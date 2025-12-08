@@ -56,41 +56,24 @@ export async function runDeployment(deploymentId: string) {
       return { success: false, error: "Deployment not found" };
     }
 
-    // Update status to queued
+    // Update status to running
     await supabase
       .from("deployments")
-      .update({ status: "queued" })
-      .eq("id", validated)
-      .eq("user_id", user.id);
+      .update({ status: "running" })
+      .eq("id", validated);
 
     await createActivityLog({
-      event: "deployment_queued",
+      event: "deployment_status_updated",
       user_id: user.id,
-      description: `Deployment queued for ${deployment.projects.name}`,
+      description: `Deployment started for ${deployment.projects.name}`,
       deployment_id: validated,
       project_id: deployment.project_id,
-      metadata: { project_name: deployment.projects.name, environment: deployment.environment, branch: deployment.branch, status: "queued" },
+      metadata: { deployment_id: validated, status: "running" },
     });
 
     // Stage 1: Initialize
     await insertDeploymentLog(validated, "[1/4] Initializing deployment...", "info");
     await delay(800);
-
-    // Update to in_progress
-    await supabase
-      .from("deployments")
-      .update({ status: "in_progress" })
-      .eq("id", validated)
-      .eq("user_id", user.id);
-
-    await createActivityLog({
-      event: "deployment_building",
-      user_id: user.id,
-      description: `Building ${deployment.projects.name}`,
-      deployment_id: validated,
-      project_id: deployment.project_id,
-      metadata: { project_name: deployment.projects.name, environment: deployment.environment, branch: deployment.branch, status: "building" },
-    });
 
     // Stage 2: Connect to repo
     await insertDeploymentLog(validated, `[2/4] Connecting to GitHub repository ${deployment.projects.github_repo_url}...`, "info");
@@ -103,15 +86,6 @@ export async function runDeployment(deploymentId: string) {
     await insertDeploymentLog(validated, "🔨 Building application...", "info");
     await delay(1000);
 
-    await createActivityLog({
-      event: "deployment_deploying",
-      user_id: user.id,
-      description: `Deploying ${deployment.projects.name} to ${deployment.environment}`,
-      deployment_id: validated,
-      project_id: deployment.project_id,
-      metadata: { project_name: deployment.projects.name, environment: deployment.environment, branch: deployment.branch, status: "deploying" },
-    });
-
     // Stage 4: Finalize
     await insertDeploymentLog(validated, `[4/4] Finalizing deployment to ${deployment.environment}...`, "info");
     await delay(800);
@@ -123,17 +97,16 @@ export async function runDeployment(deploymentId: string) {
       await insertDeploymentLog(validated, "✅ Deployment completed successfully!", "success");
       await supabase
         .from("deployments")
-        .update({ status: "completed" })
-        .eq("id", validated)
-        .eq("user_id", user.id);
+        .update({ status: "success" })
+        .eq("id", validated);
 
       await createActivityLog({
-        event: "deployment_completed",
+        event: "deployment_status_updated",
         user_id: user.id,
         description: `Successfully deployed ${deployment.projects.name} to ${deployment.environment}`,
         deployment_id: validated,
         project_id: deployment.project_id,
-        metadata: { project_name: deployment.projects.name, environment: deployment.environment, branch: deployment.branch, status: "completed" },
+        metadata: { deployment_id: validated, status: "success" },
       });
 
       return { success: true };
@@ -142,16 +115,15 @@ export async function runDeployment(deploymentId: string) {
       await supabase
         .from("deployments")
         .update({ status: "failed" })
-        .eq("id", validated)
-        .eq("user_id", user.id);
+        .eq("id", validated);
 
       await createActivityLog({
-        event: "deployment_failed",
+        event: "deployment_status_updated",
         user_id: user.id,
         description: `Deployment failed for ${deployment.projects.name}`,
         deployment_id: validated,
         project_id: deployment.project_id,
-        metadata: { project_name: deployment.projects.name, environment: deployment.environment, branch: deployment.branch, status: "failed", error: "Build error" },
+        metadata: { deployment_id: validated, status: "failed" },
       });
 
       return { success: false, error: "Deployment failed" };
