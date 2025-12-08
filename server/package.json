@@ -1,0 +1,12 @@
+{
+  "name": "pipeline-xr-ws-server",
+  "version": "1.0.0",
+  "description": "Mock WebSocket server for deployment logs",
+  "main": "ws-server.js",
+  "scripts": {
+    "start": "node ws-server.js"
+  },
+  "dependencies": {
+    "ws": "^8.14.2"
+  }
+}
