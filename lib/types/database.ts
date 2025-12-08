@@ -5,6 +5,7 @@ export type Project = {
   github_repo_url: string;
   auto_deploy_enabled: boolean;
   auto_deploy_branch: string | null;
+  webhook_url: string | null;
   webhook_secret: string | null;
   created_at: string;
   updated_at: string;

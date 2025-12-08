@@ -310,3 +310,38 @@ export async function regenerateWebhookSecret(projectId: string) {
     return { success: false, error: "Failed to regenerate webhook secret" };
   }
 }
+
+export async function updateProjectWebhookUrl(projectId: string, webhookUrl: string) {
+  try {
+    const supabase = await createClient();
+
+    const { data: { user }, error: authError } = await supabase.auth.getUser();
+    if (authError || !user) {
+      return { success: false, error: "Unauthorized" };
+    }
+
+    const { data, error } = await supabase
+      .from("projects")
+      .update({ webhook_url: webhookUrl })
+      .eq("id", projectId)
+      .eq("user_id", user.id)
+      .select()
+      .single();
+
+    if (error) {
+      return { success: false, error: error.message };
+    }
+
+    await createActivityLog({
+      event: "webhook_url_updated",
+      user_id: user.id,
+      description: `Webhook URL updated to ${webhookUrl}`,
+      project_id: projectId,
+      metadata: { webhook_url: webhookUrl },
+    });
+
+    return { success: true, data };
+  } catch (error) {
+    return { success: false, error: "Failed to update webhook URL" };
+  }
+}

@@ -12,7 +12,7 @@ import { Separator } from "@/components/ui/separator";
 import { Skeleton } from "@/components/ui/skeleton";
 import { ArrowLeft, Github, Save, Trash2, RefreshCw, Copy, Eye, EyeOff, Webhook } from "lucide-react";
 import { Switch } from "@/components/ui/switch";
-import { getProjectById, updateProject, deleteProject, getGitHubRepos, updateProjectAutoDeploy, regenerateWebhookSecret } from "@/app/dashboard/actions";
+import { getProjectById, updateProject, deleteProject, getGitHubRepos, updateProjectAutoDeploy, regenerateWebhookSecret, updateProjectWebhookUrl } from "@/app/dashboard/actions";
 import { createClient } from "@/lib/supabase-browser";
 import { toast } from "sonner";
 import type { Project } from "@/lib/types/database";
@@ -44,6 +44,7 @@ export default function ProjectSettingsPage() {
   const [showRepoSelector, setShowRepoSelector] = useState(false);
   const [autoDeployEnabled, setAutoDeployEnabled] = useState(false);
   const [autoDeployBranch, setAutoDeployBranch] = useState("main");
+  const [webhookUrl, setWebhookUrl] = useState("");
   const [showWebhookSecret, setShowWebhookSecret] = useState(false);
 
   const [formData, setFormData] = useState({
@@ -66,6 +67,7 @@ export default function ProjectSettingsPage() {
       });
       setAutoDeployEnabled(result.data.auto_deploy_enabled);
       setAutoDeployBranch(result.data.auto_deploy_branch || "main");
+      setWebhookUrl(result.data.webhook_url || `${window.location.origin}/api/github/webhook`);
     } else {
       toast.error(result.error || "Failed to load project");
       router.push("/dashboard/projects");
@@ -224,6 +226,22 @@ export default function ProjectSettingsPage() {
     setSaving(false);
   }
 
+  async function handleSaveWebhookUrl() {
+    if (!webhookUrl.trim()) {
+      toast.error("Webhook URL is required");
+      return;
+    }
+    setSaving(true);
+    const result = await updateProjectWebhookUrl(projectId, webhookUrl);
+    if (result.success) {
+      toast.success("Webhook URL updated");
+      fetchProject();
+    } else {
+      toast.error(result.error || "Failed to update webhook URL");
+    }
+    setSaving(false);
+  }
+
   function copyToClipboard(text: string, label: string) {
     navigator.clipboard.writeText(text);
     toast.success(`${label} copied to clipboard`);
@@ -368,23 +386,29 @@ export default function ProjectSettingsPage() {
               <Separator />
 
               <div className="space-y-2">
-                <Label>Webhook URL</Label>
+                <Label htmlFor="webhook-url">Webhook URL</Label>
                 <div className="flex gap-2">
                   <Input
-                    value={`${window.location.origin}/api/github/webhook`}
-                    readOnly
+                    id="webhook-url"
+                    value={webhookUrl}
+                    onChange={(e) => setWebhookUrl(e.target.value)}
+                    placeholder="https://your-domain.com/api/github/webhook"
                     className="font-mono text-sm"
                   />
                   <Button
                     variant="outline"
                     size="icon"
-                    onClick={() => copyToClipboard(`${window.location.origin}/api/github/webhook`, "Webhook URL")}
+                    onClick={() => copyToClipboard(webhookUrl, "Webhook URL")}
                   >
                     <Copy className="h-4 w-4" />
                   </Button>
+                  <Button onClick={handleSaveWebhookUrl} disabled={saving || webhookUrl === project.webhook_url}>
+                    <Save className="h-4 w-4 mr-2" />
+                    Save
+                  </Button>
                 </div>
                 <p className="text-xs text-muted-foreground">
-                  Add this URL to your GitHub repository webhooks
+                  Add this URL to your GitHub repository webhooks. Use ngrok URL for local development.
                 </p>
               </div>
 
