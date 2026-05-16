@@ -10,11 +10,13 @@ import { DeploymentTypes } from "@/components/home/DeploymentTypes";
 import { Testimonials } from "@/components/home/Testimonials";
 import { FinalCTA } from "@/components/home/FinalCTA";
 import { DarkThemeBackground } from "@/components/home/DarkThemeBackground";
+import { FloatingHomeBot } from "@/components/ai/FloatingHomeBot";
 
 export default function Home() {
   return (
     <main className="relative min-h-screen overflow-hidden">
       <DarkThemeBackground />
+      <FloatingHomeBot />
       <Navbar />
       <Hero />
       <div className="relative w-full">

@@ -4,7 +4,7 @@ import { motion } from "framer-motion";
 import Link from "next/link";
 import { Github, Eye, EyeOff } from "lucide-react";
 import { Spotlight } from "@/components/ui/spotlight";
-import { createClient } from "@/lib/supabase-browser";
+import { supabase } from "@/lib/supabase-browser";
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 
@@ -18,7 +18,7 @@ export default function SignupPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const router = useRouter();
-  const supabase = createClient();
+  
 
   const handleSignup = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -50,10 +50,12 @@ export default function SignupPage() {
   };
 
   const handleGithubSignup = async () => {
+    const redirectTo = "/dashboard"; // Define redirectTo for OAuth
     const { error } = await supabase.auth.signInWithOAuth({
       provider: "github",
       options: {
-        redirectTo: `${window.location.origin}/auth/callback`,
+        redirectTo: `${window.location.origin}/auth/callback?redirect=${encodeURIComponent(redirectTo)}`,
+        scopes: "repo read:user",
       },
     });
 
@@ -196,7 +198,7 @@ export default function SignupPage() {
 
           {/* OAuth Buttons */}
           <div className="space-y-3">
-            <button 
+            <button
               onClick={handleGithubSignup}
               type="button"
               className="flex w-full items-center justify-center gap-3 rounded-lg border border-white/10 bg-white/5 px-4 py-3 font-medium text-white backdrop-blur-sm transition-all hover:bg-white/10"
@@ -205,7 +207,7 @@ export default function SignupPage() {
               Continue with GitHub
             </button>
 
-            <button 
+            <button
               onClick={handleGoogleSignup}
               type="button"
               className="flex w-full items-center justify-center gap-3 rounded-lg border border-white/10 bg-white/5 px-4 py-3 font-medium text-white backdrop-blur-sm transition-all hover:bg-white/10"
@@ -246,3 +248,4 @@ export default function SignupPage() {
     </div>
   );
 }
+

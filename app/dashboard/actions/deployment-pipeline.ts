@@ -1,174 +1,96 @@
 "use server";
 
-import { createClient } from "@/lib/supabase-server";
-import { createActivityLog } from "./activity";
-import { z } from "zod";
+import { getSupabaseServer } from "@/lib/supabase-server";
 
-export async function updateDeploymentStatus(
-  deploymentId: string,
-  status: "queued" | "in_progress" | "completed" | "failed" | "cancelled"
-) {
-  try {
-    const supabase = await createClient();
+async function insertLogIfNew(deploymentId: string, userId: string, message: string, level: string) {
+  const supabase = await getSupabaseServer();
 
-    const { data: { user }, error: authError } = await supabase.auth.getUser();
-    if (authError || !user) {
-      return { success: false, error: "Unauthorized" };
-    }
+  // Check if same message exists in last 10 seconds
+  const tenSecondsAgo = new Date(Date.now() - 10000).toISOString();
+  const { data: recentLogs } = await supabase
+    .from('deployment_logs')
+    .select('message')
+    .eq('deployment_id', deploymentId)
+    .eq('message', message)
+    .gte('created_at', tenSecondsAgo)
+    .limit(1);
 
-    const { data, error } = await supabase
-      .from("deployments")
-      .update({ status })
-      .eq("id", deploymentId)
-      .eq("user_id", user.id)
-      .select()
-      .single();
-
-    if (error) {
-      return { success: false, error: error.message };
-    }
-
-    await createActivityLog({
-      event_type: "deployment_status_updated",
-      description: `Deployment ${deploymentId.slice(0, 8)} status changed to ${status}`,
-    });
-
-    return { success: true, data };
-  } catch (error) {
-    return { success: false, error: "Failed to update deployment status" };
+  if (recentLogs && recentLogs.length > 0) {
+    return; // Skip duplicate message
   }
-}
 
-async function insertDeploymentLog(
-  deploymentId: string,
-  message: string,
-  level: "info" | "success" | "error" | "warning" = "info"
-) {
-  const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) return;
-
-  await supabase.from("deployment_logs").insert({
+  await supabase.from('deployment_logs').insert({
     deployment_id: deploymentId,
-    user_id: user.id,
+    user_id: userId,
     message,
-    level,
+    level
   });
 }
 
 export async function runDeploymentPipeline(deploymentId: string) {
+  const supabase = await getSupabaseServer();
+
   try {
-    const supabase = await createClient();
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return { success: false, error: "Unauthorized" };
 
-    const { data: { user }, error: authError } = await supabase.auth.getUser();
-    if (authError || !user) {
-      return { success: false, error: "Unauthorized" };
-    }
-
-    // Get deployment details
-    const { data: deployment, error: fetchError } = await supabase
+    // Get deployment
+    const { data: deployment } = await supabase
       .from("deployments")
-      .select("*, projects(*)")
+      .select("*, projects(name)")
       .eq("id", deploymentId)
-      .eq("user_id", user.id)
       .single();
 
-    if (fetchError || !deployment) {
-      return { success: false, error: "Deployment not found" };
-    }
+    if (!deployment) return { success: false, error: "Deployment not found" };
 
-    // Stage 1: Initialize
-    await updateDeploymentStatus(deploymentId, "in_progress");
-    await insertDeploymentLog(deploymentId, "🚀 Deployment started", "info");
-    await insertDeploymentLog(deploymentId, `[1/3] Initializing build for ${deployment.projects.name}...`, "info");
-    await createActivityLog({
-      event_type: "deployment_started",
-      description: `Started deployment for ${deployment.projects.name} (${deployment.branch})`,
-    });
+    // Generate URL early
+    const projectSlug = deployment.projects.name.toLowerCase().replace(/[^a-z0-9]/g, '-');
+    const deploymentUrl = `https://${projectSlug}-${deployment.environment}.pipelinexr.app`;
 
-    await new Promise(resolve => setTimeout(resolve, 1500));
+    // Start deployment
+    await supabase.from("deployments").update({ status: "building" }).eq("id", deploymentId);
+    await insertLogIfNew(deploymentId, user.id, "🚀 Build started", "info");
 
-    // Stage 2: Build
-    await insertDeploymentLog(deploymentId, `[2/3] Building project from branch: ${deployment.branch}`, "info");
-    await insertDeploymentLog(deploymentId, "📦 Installing dependencies...", "info");
-    await new Promise(resolve => setTimeout(resolve, 1500));
-    await insertDeploymentLog(deploymentId, "🔨 Compiling application...", "info");
-    await new Promise(resolve => setTimeout(resolve, 1500));
+    await new Promise(resolve => setTimeout(resolve, 2000));
 
-    // Stage 3: Deploy
-    await insertDeploymentLog(deploymentId, `[3/3] Finalizing deployment to ${deployment.environment}...`, "info");
-    await insertDeploymentLog(deploymentId, "☁️ Uploading to cloud...", "info");
-    await new Promise(resolve => setTimeout(resolve, 1500));
-    await insertDeploymentLog(deploymentId, "✅ Health checks passed", "success");
+    await insertLogIfNew(deploymentId, user.id, "📦 Installing dependencies...", "info");
+    await new Promise(resolve => setTimeout(resolve, 2000));
 
-    // Complete
-    await updateDeploymentStatus(deploymentId, "completed");
-    await insertDeploymentLog(deploymentId, "🎉 Deployment completed successfully!", "success");
-    await createActivityLog({
-      event_type: "deployment_completed",
-      description: `Successfully deployed ${deployment.projects.name}`,
-    });
+    await insertLogIfNew(deploymentId, user.id, "🔨 Building application...", "info");
+    await new Promise(resolve => setTimeout(resolve, 2000));
+
+    // Complete with URL stored
+    await supabase.from("deployments").update({
+      status: "success",
+      deployment_url: deploymentUrl
+    }).eq("id", deploymentId);
+
+    await insertLogIfNew(deploymentId, user.id, `🌐 Live at: ${deploymentUrl}`, "success");
+    await insertLogIfNew(deploymentId, user.id, "🎉 Deployment successful!", "success");
 
     return { success: true, message: "Deployment completed successfully" };
   } catch (error) {
-    await updateDeploymentStatus(deploymentId, "failed");
-    await insertDeploymentLog(deploymentId, `❌ Deployment failed: ${error}`, "error");
-    await createActivityLog({
-      event_type: "deployment_failed",
-      description: `Deployment ${deploymentId.slice(0, 8)} failed: ${error}`,
-    });
-    return { success: false, error: "Deployment pipeline failed" };
+    await supabase.from("deployments").update({ status: "failed" }).eq("id", deploymentId);
+    console.error(`Deployment ${deploymentId} failed:`, error);
+    return { success: false, error: "Deployment failed" };
   }
 }
 
 export async function getDeploymentLogs(deploymentId: string) {
   try {
-    const supabase = await createClient();
-
-    const { data: { user }, error: authError } = await supabase.auth.getUser();
-    if (authError || !user) {
-      return { success: false, error: "Unauthorized" };
-    }
+    const supabase = await getSupabaseServer();
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return { success: false, error: "Unauthorized" };
 
     const { data, error } = await supabase
       .from("deployment_logs")
       .select("*")
       .eq("deployment_id", deploymentId)
-      .eq("user_id", user.id)
       .order("created_at", { ascending: true });
 
-    if (error) {
-      return { success: false, error: error.message };
-    }
-
+    if (error) return { success: false, error: error.message };
     return { success: true, data };
   } catch (error) {
     return { success: false, error: "Failed to fetch deployment logs" };
-  }
-}
-
-export async function getDeploymentById(deploymentId: string) {
-  try {
-    const supabase = await createClient();
-
-    const { data: { user }, error: authError } = await supabase.auth.getUser();
-    if (authError || !user) {
-      return { success: false, error: "Unauthorized" };
-    }
-
-    const { data, error } = await supabase
-      .from("deployments")
-      .select("*, projects(name)")
-      .eq("id", deploymentId)
-      .eq("user_id", user.id)
-      .single();
-
-    if (error) {
-      return { success: false, error: error.message };
-    }
-
-    return { success: true, data };
-  } catch (error) {
-    return { success: false, error: "Failed to fetch deployment" };
   }
 }

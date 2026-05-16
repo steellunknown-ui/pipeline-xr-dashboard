@@ -13,11 +13,13 @@ import {
   FolderKanban,
   Key,
   Bot,
-  Activity
+  Activity,
+  Home
 } from "lucide-react";
 import { useState } from "react";
 
 const navigation = [
+  { name: "← Back to Homepage", href: "/", icon: Home, special: true },
   { name: "Overview", href: "/dashboard", icon: LayoutDashboard },
   { name: "Projects", href: "/dashboard/projects", icon: FolderKanban },
   { name: "Deployments", href: "/dashboard/deployments", icon: Rocket },
@@ -25,7 +27,7 @@ const navigation = [
   { name: "AI Assistant", href: "/dashboard/ai", icon: Bot },
   { name: "Activity", href: "/dashboard/activity", icon: Activity },
   { name: "Logs", href: "/dashboard/logs", icon: FileText },
-  { name: "Settings", href: "/settings", icon: Settings },
+  { name: "Settings", href: "/dashboard/settings", icon: Settings },
 ];
 
 export function Sidebar() {
@@ -72,7 +74,9 @@ export function Sidebar() {
                   onClick={() => setIsOpen(false)}
                   className={cn(
                     "flex items-center px-3 py-2 text-sm font-medium rounded-md transition-colors",
-                    isActive
+                    item.special
+                      ? "text-primary hover:bg-primary/10 border border-primary/20"
+                      : isActive
                       ? "bg-primary text-primary-foreground"
                       : "text-muted-foreground hover:text-foreground hover:bg-muted"
                   )}
@@ -118,7 +122,9 @@ export function Sidebar() {
                   href={item.href}
                   className={cn(
                     "flex items-center px-3 py-2.5 text-sm font-medium rounded-md transition-colors",
-                    isActive
+                    item.special
+                      ? "text-primary hover:bg-primary/10 border border-primary/20"
+                      : isActive
                       ? "bg-primary text-primary-foreground"
                       : "text-muted-foreground hover:text-foreground hover:bg-muted"
                   )}

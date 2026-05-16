@@ -1,21 +1,14 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
-import { cookies } from "next/headers";
+import { getSupabaseServer } from "@/lib/supabase-server";
 import { sendEmail } from "@/lib/sendEmail";
 
 export async function POST() {
   try {
-    const cookieStore = await cookies();
     const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
-    const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
 
-    const supabaseClient = createClient(supabaseUrl, supabaseAnonKey, {
-      cookies: {
-        get(name: string) {
-          return cookieStore.get(name)?.value;
-        },
-      },
-    });
+    // Get current user using server client
+    const supabaseClient = await getSupabaseServer();
 
     const supabase = createClient(
       supabaseUrl,

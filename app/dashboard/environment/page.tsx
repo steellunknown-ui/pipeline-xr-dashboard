@@ -12,9 +12,10 @@ import { Card } from "@/components/ui/card";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
 import { Plus, Eye, EyeOff, Copy, Pencil, Trash2, Mail } from "lucide-react";
 import { addEnvVariable, getEnvVariables, deleteEnvVariable, updateEnvVariable } from "../actions";
-import { createClient } from "@/lib/supabase-browser";
+import { supabase } from "@/lib/supabase-browser";
 import { toast } from "sonner";
 import type { EnvironmentVariable } from "@/lib/types/database";
+import { GradientBar } from "@/components/ui/gradient-bar";
 
 export default function EnvironmentPage() {
   const [variables, setVariables] = useState<EnvironmentVariable[]>([]);
@@ -31,7 +32,7 @@ export default function EnvironmentPage() {
   const [otpCode, setOtpCode] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [userEmail, setUserEmail] = useState<string>("");
-  const supabase = createClient();
+  
 
   useEffect(() => {
     fetchVariables();
@@ -199,6 +200,7 @@ export default function EnvironmentPage() {
 
   return (
     <div className="space-y-6">
+      <GradientBar />
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-3xl font-bold">Environment Variables</h1>
@@ -402,3 +404,4 @@ export default function EnvironmentPage() {
     </div>
   );
 }
+

@@ -1,7 +1,13 @@
 import { createServerClient, type CookieOptions } from '@supabase/ssr'
 import { cookies } from 'next/headers'
+import dns from 'node:dns'
 
-export async function createClient() {
+// Force IPv4 for Node.js fetch/undici timeouts connecting to Supabase
+if (typeof dns.setDefaultResultOrder === 'function') {
+  dns.setDefaultResultOrder('ipv4first')
+}
+
+export async function getSupabaseServer() {
   const cookieStore = await cookies()
 
   return createServerClient(
@@ -16,17 +22,20 @@ export async function createClient() {
           try {
             cookieStore.set({ name, value, ...options })
           } catch (error) {
-            // Handle cookie setting errors in server components
+            // Ignore errors in read-only contexts (e.g., during rendering)
           }
         },
         remove(name: string, options: CookieOptions) {
           try {
             cookieStore.set({ name, value: '', ...options })
           } catch (error) {
-            // Handle cookie removal errors in server components
+            // Ignore errors in read-only contexts
           }
         },
       },
     }
   )
 }
+
+// Alias for backward compatibility with existing code
+export const createClient = getSupabaseServer;

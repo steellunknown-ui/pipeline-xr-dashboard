@@ -2,21 +2,22 @@
 
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
-import { supabase } from "@/lib/supabase";
-import { 
-  User, 
-  Edit3, 
-  Sun, 
-  Moon, 
-  Key, 
-  Copy, 
-  RefreshCw, 
+import { supabase } from "@/lib/supabase-browser";
+import {
+  User,
+  Edit3,
+  Sun,
+  Moon,
+  Key,
+  Copy,
+  RefreshCw,
   Trash2,
   AlertTriangle
 } from "lucide-react";
 import Image from "next/image";
 
 export default function SettingsPage() {
+  
   const router = useRouter();
   const [user, setUser] = useState<any>(null);
   const [theme, setTheme] = useState<"light" | "dark">("light");
@@ -52,21 +53,21 @@ export default function SettingsPage() {
 
   const deleteAccount = async () => {
     setIsDeleting(true);
-    
+
     try {
       await new Promise(resolve => setTimeout(resolve, 2000));
-      
+
       setIsDeleting(false);
       setDeleteSuccess(true);
-      
+
       setTimeout(async () => {
         setShowDeleteDialog(false);
         setDeleteSuccess(false);
-        
+
         await supabase.auth.signOut();
         router.push('/login');
       }, 2000);
-      
+
     } catch (error) {
       setIsDeleting(false);
       console.error('Account deletion failed:', error);
@@ -124,14 +125,12 @@ export default function SettingsPage() {
             </div>
             <button
               onClick={toggleTheme}
-              className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
-                theme === "dark" ? "bg-primary" : "bg-muted"
-              }`}
+              className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${theme === "dark" ? "bg-primary" : "bg-muted"
+                }`}
             >
               <span
-                className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
-                  theme === "dark" ? "translate-x-6" : "translate-x-1"
-                }`}
+                className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${theme === "dark" ? "translate-x-6" : "translate-x-1"
+                  }`}
               />
               <div className="absolute inset-0 flex items-center justify-between px-1">
                 <Sun className="h-3 w-3 text-yellow-500" />
@@ -213,7 +212,7 @@ export default function SettingsPage() {
                   </div>
                 </div>
                 <p className="text-sm text-muted-foreground mb-6">
-                  Are you sure you want to delete your account? All of your data will be permanently removed. 
+                  Are you sure you want to delete your account? All of your data will be permanently removed.
                   This action cannot be undone.
                 </p>
                 <div className="flex gap-3 justify-end">

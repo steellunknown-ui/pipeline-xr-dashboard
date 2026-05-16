@@ -1,6 +1,6 @@
 "use server";
 
-import { createClient } from "@/lib/supabase-server";
+import { getSupabaseServer } from "@/lib/supabase-server";
 import { z } from "zod";
 import { createActivityLog } from "./activity";
 
@@ -19,7 +19,7 @@ export async function addEnvVariable(formData: {
 }) {
   try {
     const validated = envVariableSchema.parse(formData);
-    const supabase = await createClient();
+    const supabase = await getSupabaseServer();
 
     const { data: { user }, error: authError } = await supabase.auth.getUser();
     if (authError || !user) {
@@ -46,14 +46,14 @@ export async function addEnvVariable(formData: {
       event: "env_variable_added",
       user_id: user.id,
       description: `Added environment variable: ${validated.key}`,
-      project_id: validated.project_id || null,
+      project_id: validated.project_id,
       metadata: { key: validated.key, environment: validated.environment },
     });
 
     return { success: true, data };
   } catch (error) {
     if (error instanceof z.ZodError) {
-      return { success: false, error: error.errors[0].message };
+      return { success: false, error: error.issues[0].message };
     }
     return { success: false, error: "Failed to add environment variable" };
   }
@@ -61,7 +61,7 @@ export async function addEnvVariable(formData: {
 
 export async function getEnvVariables(projectId?: string) {
   try {
-    const supabase = await createClient();
+    const supabase = await getSupabaseServer();
 
     const { data: { user }, error: authError } = await supabase.auth.getUser();
     if (authError || !user) {
@@ -92,7 +92,7 @@ export async function getEnvVariables(projectId?: string) {
 
 export async function updateEnvVariable(id: string, formData: { key: string; value: string }) {
   try {
-    const supabase = await createClient();
+    const supabase = await getSupabaseServer();
 
     const { data: { user }, error: authError } = await supabase.auth.getUser();
     if (authError || !user) {
@@ -129,7 +129,7 @@ export async function updateEnvVariable(id: string, formData: { key: string; val
 
 export async function deleteEnvVariable(id: string) {
   try {
-    const supabase = await createClient();
+    const supabase = await getSupabaseServer();
 
     const { data: { user }, error: authError } = await supabase.auth.getUser();
     if (authError || !user) {

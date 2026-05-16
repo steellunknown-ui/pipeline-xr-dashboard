@@ -12,7 +12,7 @@ import { validateGitHubRepo } from "../actions/github-validation";
 import { getProjects, updateProject, getGitHubRepos } from "../actions/projects";
 import { toast } from "sonner";
 import { CheckCircle2, XCircle, AlertCircle, Loader2, Github, RefreshCw } from "lucide-react";
-import { createClient } from "@/lib/supabase-browser";
+import { supabase } from "@/lib/supabase-browser";
 
 export default function ValidateRepoPage() {
   const [projects, setProjects] = useState<any[]>([]);
@@ -25,7 +25,7 @@ export default function ValidateRepoPage() {
   const [availableRepos, setAvailableRepos] = useState<any[]>([]);
   const [loadingRepos, setLoadingRepos] = useState(false);
   const [needsReauth, setNeedsReauth] = useState(false);
-  const supabase = createClient();
+  
 
   useEffect(() => {
     loadProjects();
@@ -364,3 +364,4 @@ export default function ValidateRepoPage() {
     </div>
   );
 }
+

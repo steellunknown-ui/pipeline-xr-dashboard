@@ -3,12 +3,16 @@ export type Project = {
   user_id: string;
   name: string;
   github_repo_url: string;
-  auto_deploy_enabled: boolean;
+  webhook_enabled: boolean;
   auto_deploy_branch: string | null;
-  webhook_url: string | null;
   webhook_secret: string | null;
   created_at: string;
   updated_at: string;
+  envState?: {
+    status: "NOT_REQUIRED" | "REQUIRED_MISSING" | "CONFIGURED";
+    reason: string;
+    envCount: number;
+  };
 };
 
 export type Deployment = {
@@ -18,8 +22,13 @@ export type Deployment = {
   environment: "development" | "staging" | "production";
   branch: string;
   commit_hash?: string | null;
-  status: "queued" | "in_progress" | "completed" | "failed" | "cancelled";
+  commit_sha?: string | null;
+  source?: "github" | "zip" | "manual";
+  deployment_url?: string | null;
+  status: "pending" | "building" | "success" | "failed" | "cancelled";
   created_at: string;
+  env_fingerprint?: string | null;
+  envOutdated?: { outdated: boolean; reason: string };
 };
 
 export type DeploymentWithProject = Deployment & {

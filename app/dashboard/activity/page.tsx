@@ -8,6 +8,7 @@ import { Activity, GitCommit, Rocket, Settings as SettingsIcon } from "lucide-re
 import { getActivityLogs } from "../actions";
 import { toast } from "sonner";
 import type { ActivityLog } from "@/lib/types/database";
+import { GradientBar } from "@/components/ui/gradient-bar";
 
 
 
@@ -43,6 +44,7 @@ export default function ActivityPage() {
   };
   return (
     <div className="space-y-6">
+      <GradientBar />
       <div>
         <h1 className="text-3xl font-bold">Activity Log</h1>
         <p className="text-muted-foreground mt-1">Track all events and changes in your workspace</p>

@@ -1,6 +1,6 @@
 "use server";
 
-import { createClient } from "@/lib/supabase-server";
+import { getSupabaseServer } from "@/lib/supabase-server";
 
 export async function createActivityLog(data: {
   event: string;
@@ -10,8 +10,8 @@ export async function createActivityLog(data: {
   deployment_id?: string;
   metadata?: any;
 }): Promise<void> {
-  const supabase = await createClient();
-  
+  const supabase = await getSupabaseServer();
+
   const { error } = await supabase.from("activity_logs").insert({
     event: data.event,
     description: data.description || null,
@@ -28,7 +28,7 @@ export async function createActivityLog(data: {
 
 export async function getActivityLogs(limit: number = 50) {
   try {
-    const supabase = await createClient();
+    const supabase = await getSupabaseServer();
 
     const { data: { user }, error: authError } = await supabase.auth.getUser();
     if (authError || !user) {

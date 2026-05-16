@@ -2,7 +2,7 @@
 
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
-import { supabase } from "@/lib/supabase";
+import { supabase } from "@/lib/supabase-browser";
 import { Sidebar } from "@/components/layout/sidebar";
 import { Topbar } from "@/components/layout/topbar";
 import ProfileSection from "@/components/settings/ProfileSection";
@@ -12,6 +12,7 @@ import AppearanceSection from "@/components/settings/AppearanceSection";
 import DeleteAccountSection from "@/components/settings/DeleteAccountSection";
 
 export default function SettingsPage() {
+  
   const router = useRouter();
   const [loading, setLoading] = useState(true);
   const [session, setSession] = useState<any>(null);
@@ -52,7 +53,7 @@ export default function SettingsPage() {
               <h1 className="text-3xl font-bold">Settings</h1>
               <p className="text-muted-foreground mt-1">Manage your account settings</p>
             </div>
-            
+
             <ProfileSection />
             <SecuritySection />
             <PasswordSection />
@@ -64,3 +65,4 @@ export default function SettingsPage() {
     </div>
   );
 }
+

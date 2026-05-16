@@ -1,15 +1,20 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { Eye, GitBranch, Clock, Activity, Server, Search } from "lucide-react";
+import { Eye, GitBranch, Clock, Activity, Server, Search, Github } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
+import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { getActivityLogs } from "../actions";
+import { verifyGithubAccess } from "../actions/projects";
 import { toast } from "sonner";
 import type { ActivityLog } from "@/lib/types/database";
 import { cn } from "@/lib/utils";
+import { GradientBar } from "@/components/ui/gradient-bar";
+import { GitHubProviderModal } from "@/components/modals/GitHubProviderModal";
+import { supabase } from "@/lib/supabase-browser";
 
 
 
@@ -20,6 +25,35 @@ export default function LogsPage() {
   const [filteredLogs, setFilteredLogs] = useState<ActivityLog[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState("");
+  const [githubStatus, setGithubStatus] = useState<any>(null);
+  const [checkingGithub, setCheckingGithub] = useState(false);
+  const [showProviderModal, setShowProviderModal] = useState(false);
+  const [userProvider, setUserProvider] = useState<string | null>(null);
+
+  useEffect(() => {
+    // Check user's auth provider
+    const checkProvider = async () => {
+      
+      const { data: { session } } = await supabase.auth.getSession();
+      setUserProvider(session?.user?.app_metadata?.provider || null);
+    };
+    checkProvider();
+  }, []);
+
+  const checkGithubAccess = async () => {
+    setCheckingGithub(true);
+    
+    // Check if user is Google provider
+    if (userProvider === 'google') {
+      setShowProviderModal(true);
+      setCheckingGithub(false);
+      return;
+    }
+    
+    const result = await verifyGithubAccess();
+    setGithubStatus(result);
+    setCheckingGithub(false);
+  };
 
   useEffect(() => {
     async function fetchLogs() {
@@ -56,19 +90,52 @@ export default function LogsPage() {
 
   return (
     <div className="space-y-6">
+      <GradientBar />
+      
+      {/* GitHub Provider Modal */}
+      <GitHubProviderModal
+        open={showProviderModal}
+        onOpenChange={setShowProviderModal}
+      />
+      
       <div>
         <h1 className="text-3xl font-bold">Activity Logs</h1>
         <p className="text-muted-foreground mt-1">Track all events and changes in your workspace</p>
       </div>
 
-      <div className="relative">
-        <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-        <Input
-          placeholder="Search logs..."
-          value={searchTerm}
-          onChange={(e) => setSearchTerm(e.target.value)}
-          className="pl-10"
-        />
+      <div className="flex items-center justify-between">
+        <div className="relative flex-1 max-w-md">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+          <Input
+            placeholder="Search logs..."
+            value={searchTerm}
+            onChange={(e) => setSearchTerm(e.target.value)}
+            className="pl-10"
+          />
+        </div>
+        
+        <div className="flex items-center gap-4">
+          <Button 
+            onClick={checkGithubAccess}
+            disabled={checkingGithub}
+            variant="outline"
+            size="sm"
+            className="flex items-center gap-2"
+          >
+            <Github className="h-4 w-4" />
+            {checkingGithub ? "Checking..." : "Check GitHub OAuth"}
+          </Button>
+          
+          {githubStatus && (
+            <div className={`px-3 py-1 rounded-full text-sm font-medium ${
+              githubStatus.hasToken 
+                ? "bg-green-100 text-green-800 border border-green-200" 
+                : "bg-red-100 text-red-800 border border-red-200"
+            }`}>
+              {githubStatus.hasToken ? "✅ OAuth Connected" : "❌ OAuth Missing"}
+            </div>
+          )}
+        </div>
       </div>
 
       <div className="rounded-md border">

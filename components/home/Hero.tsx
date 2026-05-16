@@ -4,8 +4,28 @@ import { motion } from "framer-motion";
 import { Spotlight } from "@/components/ui/spotlight";
 import { ArrowRight, LayoutDashboard } from "lucide-react";
 import Link from "next/link";
+import { useState, useEffect } from "react";
+import { createClient } from "@/lib/supabase-browser";
+import { supabase } from "@/lib/supabase-browser";
+import { AuthRequiredModal } from "@/components/auth/AuthRequiredModal";
 
 export const Hero = () => {
+  const [showAuthModal, setShowAuthModal] = useState(false);
+  const [isAuthenticated, setIsAuthenticated] = useState(false);
+
+  useEffect(() => {
+    supabase.auth.getUser().then(({ data: { user } }) => {
+      setIsAuthenticated(!!user);
+    });
+  }, []);
+
+  const handleDashboardClick = (e: React.MouseEvent) => {
+    if (!isAuthenticated) {
+      e.preventDefault();
+      setShowAuthModal(true);
+    }
+  };
+
   return (
     <div id="hero-section" className="relative flex min-h-screen w-full items-center justify-center overflow-hidden bg-black/[0.96] antialiased bg-grid-white/[0.02]">
       {/* Hero Glow */}
@@ -48,6 +68,7 @@ export const Hero = () => {
           >
             <Link
               href="/dashboard"
+              onClick={handleDashboardClick}
               className="group inline-flex items-center gap-2 rounded-full bg-white px-8 py-3 text-base font-semibold text-black transition-all hover:scale-105 hover:shadow-xl hover:shadow-white/20"
             >
               Get Started
@@ -56,12 +77,15 @@ export const Hero = () => {
             
             <Link
               href="/dashboard"
+              onClick={handleDashboardClick}
               className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/5 px-8 py-3 text-base font-semibold text-white backdrop-blur-sm transition-all hover:bg-white/10"
             >
               <LayoutDashboard className="h-4 w-4" />
               Dashboard
             </Link>
           </motion.div>
+
+          <AuthRequiredModal open={showAuthModal} onOpenChange={setShowAuthModal} redirectTo="/dashboard" />
 
           {/* Stats */}
           <motion.div

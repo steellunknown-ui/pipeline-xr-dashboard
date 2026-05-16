@@ -2,8 +2,10 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Activity, FolderKanban, Rocket, Settings, Plus, Eye, TrendingUp, Clock } from "lucide-react";
+import { Activity, FolderKanban, Rocket, Settings, Plus, Eye, TrendingUp, Clock, ExternalLink, Github } from "lucide-react";
 import { getProjects, getDeployments, getActivityLogs, getEnvVariables } from "./actions";
+import { supabase } from "@/lib/supabase-browser";
+import { recoverSession } from "@/lib/session-recovery";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -11,6 +13,13 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/com
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import type { Project, DeploymentWithProject, ActivityLog, EnvironmentVariable } from "@/lib/types/database";
 import { toast } from "sonner";
+import { GradientBar } from "@/components/ui/gradient-bar";
+import { GitHubProviderModal } from "@/components/modals/GitHubProviderModal";
+import { GitHubConnectionCard } from "@/components/github/GitHubConnectionCard";
+import { FirstTimeGuide } from "@/components/onboarding/FirstTimeGuide";
+import { WhyPipelineXR } from "@/components/onboarding/WhyPipelineXR";
+import { getOnboardingAction } from "@/lib/onboarding-rules";
+import { ActivityFeed } from "@/components/activity/ActivityFeed";
 
 export default function DashboardPage() {
   const router = useRouter();
@@ -20,10 +29,43 @@ export default function DashboardPage() {
   const [envVars, setEnvVars] = useState<EnvironmentVariable[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [hasGitHubAuth, setHasGitHubAuth] = useState(false);
+  const [showProviderModal, setShowProviderModal] = useState(false);
+
+  // PRIORITY 7.1: First-Time User Guidance
+  const onboardingAction = getOnboardingAction({
+    projects,
+    deployments,
+    lastDeployment: deployments[0],
+    autoDeployEnabled: false // TODO: Check actual auto-deploy status
+  });
+
 
   const fetchData = async () => {
     try {
       setError(null);
+
+      // Recover session if corrupted
+      const sessionValid = await recoverSession();
+      if (!sessionValid) {
+        console.log('Session recovery completed, retrying...');
+        // Give a moment for session to clear, then retry
+        setTimeout(() => window.location.reload(), 1000);
+        return;
+      }
+
+      // Debug: Check if we have a user with GitHub identity
+      const { data: { user } } = await supabase.auth.getUser();
+      console.log('Client user:', user?.id);
+      console.log('User identities:', user?.identities);
+
+      // Check for GitHub identity
+      const hasGitHubIdentity = user?.identities?.some(identity => identity.provider === 'github');
+      console.log('Has GitHub identity:', hasGitHubIdentity);
+
+      // Only show as connected if user has GitHub identity
+      setHasGitHubAuth(hasGitHubIdentity || false);
+
       const [projectsRes, deploymentsRes, activitiesRes, envVarsRes] = await Promise.all([
         getProjects(),
         getDeployments(),
@@ -31,16 +73,26 @@ export default function DashboardPage() {
         getEnvVariables(),
       ]);
 
+      const errors = [];
       if (projectsRes.success) setProjects(projectsRes.data || []);
+      else errors.push(`Projects: ${projectsRes.error}`);
+
       if (deploymentsRes.success) setDeployments(deploymentsRes.data || []);
+      else errors.push(`Deployments: ${deploymentsRes.error}`);
+
       if (activitiesRes.success) setActivities(activitiesRes.data || []);
+      else errors.push(`Activities: ${activitiesRes.error}`);
+
       if (envVarsRes.success) setEnvVars(envVarsRes.data || []);
-      
-      if (!projectsRes.success || !deploymentsRes.success || !activitiesRes.success || !envVarsRes.success) {
-        setError("Failed to load some data");
+      else errors.push(`Environment: ${envVarsRes.error}`);
+
+      if (errors.length > 0) {
+        setError(errors.join(', '));
+        console.error('Dashboard errors:', errors);
       }
     } catch (err) {
-      setError("Failed to fetch dashboard data");
+      console.error('Dashboard fetch error:', err);
+      setError(`Failed to fetch dashboard data: ${err}`);
       toast.error("Failed to load dashboard");
     } finally {
       setLoading(false);
@@ -53,9 +105,42 @@ export default function DashboardPage() {
     return () => clearInterval(interval);
   }, []);
 
-  const queuedDeployments = deployments.filter(d => d.status === "queued").length;
-  const runningDeployments = deployments.filter(d => d.status === "in_progress").length;
-  const completedDeployments = deployments.filter(d => d.status === "completed").length;
+  const connectGitHub = async () => {
+    try {
+      // Call our GitHub OAuth API route
+      const response = await fetch('/api/github/oauth', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+      });
+
+      const result = await response.json();
+
+      if (!result.success) {
+        // Handle provider mismatch specifically
+        if (result.error_code === 'PROVIDER_MISMATCH') {
+          setShowProviderModal(true);
+          return;
+        }
+
+        toast.error(result.error || 'Failed to connect GitHub');
+        return;
+      }
+
+      // Redirect to GitHub OAuth
+      if (result.url) {
+        window.location.href = result.url;
+      }
+    } catch (error) {
+      console.error('GitHub connection error:', error);
+      toast.error('Failed to initiate GitHub connection');
+    }
+  };
+
+  const queuedDeployments = deployments.filter(d => d.status === "pending").length;
+  const runningDeployments = deployments.filter(d => d.status === "building").length;
+  const successDeployments = deployments.filter(d => d.status === "success").length;
   const failedDeployments = deployments.filter(d => d.status === "failed").length;
 
   const last7DaysActivities = activities.filter(a => {
@@ -81,10 +166,10 @@ export default function DashboardPage() {
 
   const getStatusBadge = (status: string) => {
     switch (status) {
-      case "completed": return <Badge className="bg-green-500">Completed</Badge>;
+      case "success": return <Badge className="bg-green-500">Success</Badge>;
       case "failed": return <Badge variant="destructive">Failed</Badge>;
-      case "in_progress": return <Badge className="bg-blue-500">Running</Badge>;
-      case "queued": return <Badge variant="secondary">Queued</Badge>;
+      case "running": return <Badge className="bg-blue-500">Running</Badge>;
+      case "pending": return <Badge variant="secondary">Pending</Badge>;
       default: return <Badge variant="outline">{status}</Badge>;
     }
   };
@@ -92,8 +177,8 @@ export default function DashboardPage() {
   if (error && !loading) {
     return (
       <div className="flex items-center justify-center h-96">
-        <div className="text-center space-y-4">
-          <p className="text-destructive">{error}</p>
+        <div className="text-center space-y-4 max-w-md">
+          <p className="text-destructive text-sm">{error}</p>
           <Button onClick={fetchData}>Retry</Button>
         </div>
       </div>
@@ -102,6 +187,14 @@ export default function DashboardPage() {
 
   return (
     <div className="space-y-8">
+      <GradientBar />
+
+      {/* GitHub Provider Mismatch Modal */}
+      <GitHubProviderModal
+        open={showProviderModal}
+        onOpenChange={setShowProviderModal}
+      />
+
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
@@ -109,12 +202,38 @@ export default function DashboardPage() {
           <p className="text-muted-foreground mt-1">Monitor your projects, deployments, and activity</p>
         </div>
         <div className="flex gap-2">
+          {hasGitHubAuth ? (
+            <Button variant="outline" size="sm" disabled>
+              <Github className="h-4 w-4 mr-2" />
+              GitHub Connected
+            </Button>
+          ) : (
+            <Button onClick={connectGitHub} variant="outline" size="sm">
+              <Github className="h-4 w-4 mr-2" />
+              Connect GitHub
+            </Button>
+          )}
           <Button onClick={() => router.push("/dashboard/projects")} size="sm">
             <Plus className="h-4 w-4 mr-2" />
             New Project
           </Button>
         </div>
       </div>
+
+      {/* PRIORITY 7.1: First-Time User Guidance */}
+      {onboardingAction && !loading && (
+        <FirstTimeGuide action={onboardingAction} />
+      )}
+
+      {/* PRIORITY 7.2: Why Pipeline XR - Clarity Layer */}
+      {!loading && (
+        <WhyPipelineXR deployments={deployments} autoDeployEnabled={false} />
+      )}
+
+      {/* PRIORITY 9.3: Activity Feed - show only if deployments exist */}
+      {!loading && deployments.length > 0 && (
+        <ActivityFeed />
+      )}
 
       {/* Stat Cards */}
       <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
@@ -141,9 +260,9 @@ export default function DashboardPage() {
               <>
                 <div className="text-2xl font-bold">{deployments.length}</div>
                 <div className="flex gap-2 mt-2 text-xs">
-                  <span className="text-yellow-600">{queuedDeployments} queued</span>
+                  <span className="text-yellow-600">{queuedDeployments} pending</span>
                   <span className="text-blue-600">{runningDeployments} running</span>
-                  <span className="text-green-600">{completedDeployments} success</span>
+                  <span className="text-green-600">{successDeployments} success</span>
                   <span className="text-red-600">{failedDeployments} failed</span>
                 </div>
               </>
@@ -170,6 +289,35 @@ export default function DashboardPage() {
           <CardContent>
             {loading ? <Skeleton className="h-8 w-16" /> : <div className="text-2xl font-bold">{last7DaysActivities}</div>}
             <p className="text-xs text-muted-foreground mt-1">Recent events</p>
+          </CardContent>
+        </Card>
+      </div>
+
+      {/* GitHub Connection Card */}
+      <div className="grid gap-4 md:grid-cols-3">
+        <GitHubConnectionCard />
+
+        {/* Quick Actions */}
+        <Card className="md:col-span-2">
+          <CardHeader>
+            <CardTitle>Quick Actions</CardTitle>
+            <CardDescription>Common tasks to get started</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <div className="grid gap-3 sm:grid-cols-3">
+              <Button variant="outline" className="justify-start" onClick={() => router.push("/dashboard/projects")}>
+                <Plus className="h-4 w-4 mr-2" />
+                New Project
+              </Button>
+              <Button variant="outline" className="justify-start" onClick={() => router.push("/dashboard/deployments")}>
+                <Rocket className="h-4 w-4 mr-2" />
+                New Deployment
+              </Button>
+              <Button variant="outline" className="justify-start" onClick={() => router.push("/dashboard/environment")}>
+                <Settings className="h-4 w-4 mr-2" />
+                Add Environment Variable
+              </Button>
+            </div>
           </CardContent>
         </Card>
       </div>
@@ -225,6 +373,7 @@ export default function DashboardPage() {
                 <TableRow>
                   <TableHead>Status</TableHead>
                   <TableHead>Project</TableHead>
+                  <TableHead>Source</TableHead>
                   <TableHead>Environment</TableHead>
                   <TableHead>Branch</TableHead>
                   <TableHead>Timestamp</TableHead>
@@ -237,6 +386,20 @@ export default function DashboardPage() {
                     <TableCell>{getStatusBadge(deployment.status)}</TableCell>
                     <TableCell className="font-medium">{deployment.projects?.name || "Unknown"}</TableCell>
                     <TableCell>
+                      <Badge variant={(deployment.source || 'github') === 'github' ? 'default' : 'secondary'} className="flex items-center gap-1 w-fit">
+                        {(deployment.source || 'github') === 'github' ? (
+                          <>
+                            <Github className="h-3 w-3" />
+                            GitHub
+                          </>
+                        ) : (
+                          <>
+                            📦 ZIP
+                          </>
+                        )}
+                      </Badge>
+                    </TableCell>
+                    <TableCell>
                       <Badge variant="outline">{deployment.environment}</Badge>
                     </TableCell>
                     <TableCell className="font-mono text-sm">{deployment.branch}</TableCell>
@@ -247,10 +410,22 @@ export default function DashboardPage() {
                       </div>
                     </TableCell>
                     <TableCell>
-                      <Button variant="ghost" size="sm" onClick={(e) => { e.stopPropagation(); router.push(`/dashboard/deployments/${deployment.id}/logs`); }}>
-                        <Eye className="h-4 w-4 mr-1" />
-                        Logs
-                      </Button>
+                      <div className="flex gap-1">
+                        {deployment.deployment_url && deployment.status === "success" && (
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={(e) => { e.stopPropagation(); window.open(deployment.deployment_url!, '_blank'); }}
+                          >
+                            <ExternalLink className="h-3 w-3 mr-1" />
+                            Visit
+                          </Button>
+                        )}
+                        <Button variant="ghost" size="sm" onClick={(e) => { e.stopPropagation(); router.push(`/dashboard/deployments/${deployment.id}/logs`); }}>
+                          <Eye className="h-4 w-4 mr-1" />
+                          Logs
+                        </Button>
+                      </div>
                     </TableCell>
                   </TableRow>
                 ))}

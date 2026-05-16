@@ -8,13 +8,13 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { ArrowLeft, Clock } from "lucide-react";
 import { getDeploymentLogs } from "../../actions/deployment-pipeline";
 import { toast } from "sonner";
-import type { ActivityLog } from "@/lib/types/database";
+import type { DeploymentLog } from "@/lib/types/database";
 
 export default function DeploymentLogsPage() {
   const params = useParams();
   const router = useRouter();
   const deploymentId = params.id as string;
-  const [logs, setLogs] = useState<ActivityLog[]>([]);
+  const [logs, setLogs] = useState<DeploymentLog[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -62,14 +62,14 @@ export default function DeploymentLogsPage() {
               <div key={log.id} className="rounded-lg border p-3 space-y-2">
                 <div className="flex items-center justify-between">
                   <Badge variant="outline" className="capitalize">
-                    {log.event_type.replace(/_/g, " ")}
+                    {log.level}
                   </Badge>
                   <div className="flex items-center gap-1 text-xs text-muted-foreground">
                     <Clock className="h-3 w-3" />
                     {new Date(log.created_at).toLocaleString()}
                   </div>
                 </div>
-                <p className="text-sm">{log.description}</p>
+                <p className="text-sm">{log.message}</p>
               </div>
             ))
           )}

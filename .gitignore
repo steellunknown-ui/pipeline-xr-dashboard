@@ -39,3 +39,9 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# deployment storage
+/.xr-deployments/
+
+# compiled runner
+/runner/dist/

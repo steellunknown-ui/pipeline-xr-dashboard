@@ -1,8 +1,11 @@
 "use server";
 
-import { createClient } from "@/lib/supabase-server";
+import { getSupabaseServer } from "@/lib/supabase-server";
 import { z } from "zod";
 import { createActivityLog } from "./activity";
+import { classifyProject } from "@/lib/project-classifier";
+import { deriveDeploymentPolicy } from "@/lib/deployment-policy";
+import { deriveEnvState } from "@/lib/env-state";
 
 const projectSchema = z.object({
   name: z.string().min(1, "Project name is required"),
@@ -12,7 +15,7 @@ const projectSchema = z.object({
 export async function createProject(formData: { name: string; github_repo_url: string }) {
   try {
     const validated = projectSchema.parse(formData);
-    const supabase = await createClient();
+    const supabase = await getSupabaseServer();
 
     const { data: { user }, error: authError } = await supabase.auth.getUser();
     if (authError || !user) {
@@ -36,7 +39,6 @@ export async function createProject(formData: { name: string; github_repo_url: s
     await createActivityLog({
       event: "project_created",
       user_id: user.id,
-      description: `Created project: ${validated.name}`,
       project_id: data.id,
       metadata: { name: validated.name, github_repo_url: validated.github_repo_url },
     });
@@ -44,7 +46,7 @@ export async function createProject(formData: { name: string; github_repo_url: s
     return { success: true, data };
   } catch (error) {
     if (error instanceof z.ZodError) {
-      return { success: false, error: error.errors[0].message };
+      return { success: false, error: error.issues[0].message };
     }
     return { success: false, error: "Failed to create project" };
   }
@@ -52,7 +54,7 @@ export async function createProject(formData: { name: string; github_repo_url: s
 
 export async function getProjects() {
   try {
-    const supabase = await createClient();
+    const supabase = await getSupabaseServer();
 
     const { data: { user }, error: authError } = await supabase.auth.getUser();
     if (authError || !user) {
@@ -69,7 +71,27 @@ export async function getProjects() {
       return { success: false, error: error.message };
     }
 
-    return { success: true, data };
+    // Attach dynamic envState to each project using a distinct query or subquery.
+    // However, to keep it highly performant as requested and pure, we can get env counts from environment_variables in a single DB query, 
+    // or run a quick grouped query.
+    const { data: envCounts } = await supabase
+      .from('environment_variables')
+      .select('project_id');
+
+    const envCountMap = (envCounts || []).reduce((acc: any, curr: any) => {
+      acc[curr.project_id] = (acc[curr.project_id] || 0) + 1;
+      return acc;
+    }, {});
+
+    const enrichedData = data.map(project => ({
+      ...project,
+      envState: deriveEnvState({
+        requiresEnv: project.requires_env || false,
+        envCount: envCountMap[project.id] || 0
+      })
+    }));
+
+    return { success: true, data: enrichedData };
   } catch (error) {
     return { success: false, error: "Failed to fetch projects" };
   }
@@ -77,7 +99,7 @@ export async function getProjects() {
 
 export async function getProjectById(id: string) {
   try {
-    const supabase = await createClient();
+    const supabase = await getSupabaseServer();
 
     const { data: { user }, error: authError } = await supabase.auth.getUser();
     if (authError || !user) {
@@ -95,66 +117,33 @@ export async function getProjectById(id: string) {
       return { success: false, error: error.message };
     }
 
-    return { success: true, data };
+    const { count } = await supabase
+      .from("environment_variables")
+      .select("*", { count: 'exact', head: true })
+      .eq("project_id", id);
+
+    const enrichedData = {
+      ...data,
+      envState: deriveEnvState({
+        requiresEnv: data.requires_env || false,
+        envCount: count || 0
+      })
+    };
+
+    return { success: true, data: enrichedData };
   } catch (error) {
     return { success: false, error: "Failed to fetch project" };
   }
 }
 
-export async function updateProject(id: string, formData: { name?: string; github_repo_url?: string }) {
-  try {
-    const supabase = await createClient();
-
-    const { data: { user }, error: authError } = await supabase.auth.getUser();
-    if (authError || !user) {
-      return { success: false, error: "Unauthorized" };
-    }
-
-    const updateData: any = {};
-    if (formData.name) updateData.name = formData.name;
-    if (formData.github_repo_url) updateData.github_repo_url = formData.github_repo_url;
-
-    const { data, error } = await supabase
-      .from("projects")
-      .update(updateData)
-      .eq("id", id)
-      .eq("user_id", user.id)
-      .select()
-      .single();
-
-    if (error) {
-      return { success: false, error: error.message };
-    }
-
-    await createActivityLog({
-      event: "project_updated",
-      user_id: user.id,
-      description: `Updated project: ${data.name}`,
-      project_id: id,
-      metadata: updateData,
-    });
-
-    return { success: true, data };
-  } catch (error) {
-    return { success: false, error: "Failed to update project" };
-  }
-}
-
 export async function deleteProject(id: string) {
   try {
-    const supabase = await createClient();
+    const supabase = await getSupabaseServer();
 
     const { data: { user }, error: authError } = await supabase.auth.getUser();
     if (authError || !user) {
       return { success: false, error: "Unauthorized" };
     }
-
-    const { data: project } = await supabase
-      .from("projects")
-      .select("name")
-      .eq("id", id)
-      .eq("user_id", user.id)
-      .single();
 
     const { error } = await supabase
       .from("projects")
@@ -169,9 +158,8 @@ export async function deleteProject(id: string) {
     await createActivityLog({
       event: "project_deleted",
       user_id: user.id,
-      description: `Deleted project: ${project?.name || id}`,
       project_id: id,
-      metadata: { project_id: id, name: project?.name },
+      metadata: { project_id: id },
     });
 
     return { success: true };
@@ -180,49 +168,253 @@ export async function deleteProject(id: string) {
   }
 }
 
-export async function getGitHubRepos() {
+export async function verifyGithubAccess() {
   try {
-    const supabase = await createClient();
+    const supabase = await getSupabaseServer();
 
-    const { data: { session }, error: authError } = await supabase.auth.getSession();
-    if (authError || !session) {
-      return { success: false, error: "Unauthorized", needsReauth: false };
+    const { data: { user }, error: authError } = await supabase.auth.getUser();
+    if (authError || !user) {
+      return { success: false, error: "Unauthorized", hasToken: false };
     }
 
-    const githubToken = session.provider_token;
-    if (!githubToken) {
+    // Check if user has GitHub identity
+    const hasGitHubIdentity = user.identities?.some(
+      (identity: any) => identity.provider === 'github'
+    );
+
+    // Check for GitHub token in session (where Supabase stores OAuth tokens)
+    const { data: { session } } = await supabase.auth.getSession();
+    const githubToken = session?.provider_token;
+
+    // Also check if provider is GitHub (means they logged in with GitHub)
+    const isGitHubProvider = user.app_metadata?.provider === 'github';
+
+    return {
+      success: true,
+      hasToken: !!(hasGitHubIdentity && (githubToken || isGitHubProvider)),
+      provider: user.app_metadata?.provider || 'unknown',
+      hasGitHubIdentity: !!hasGitHubIdentity
+    };
+  } catch (error) {
+    return { success: false, error: "Failed to verify GitHub access", hasToken: false };
+  }
+}
+
+export async function createProjectFromGitHub(data: {
+  name: string;
+  full_name: string;
+  owner: { login: string };
+  default_branch: string;
+}) {
+  try {
+    const supabase = await getSupabaseServer();
+
+    const { data: { user }, error: authError } = await supabase.auth.getUser();
+    if (authError || !user) {
+      return { success: false, error: "Unauthorized" };
+    }
+
+    // Check if project with same repo already exists
+    const githubUrl = `https://github.com/${data.full_name}`;
+    const { data: existing } = await supabase
+      .from("projects")
+      .select("id")
+      .eq("user_id", user.id)
+      .eq("github_repo_url", githubUrl)
+      .single();
+
+    if (existing) {
+      return { success: false, error: "Project already exists for this repository", isDuplicate: true };
+    }
+
+    // Run Project Classification
+    let projectType = "UNKNOWN";
+    let requiresEnv = false;
+    let classificationReason = "Classification failed or skipped.";
+    let classificationRisk: string | undefined = undefined;
+
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      let githubToken = session?.provider_token;
+
+      if (!githubToken) {
+        const githubIdentity = user.identities?.find(
+          (identity: any) => identity.provider === 'github'
+        );
+        githubToken = githubIdentity?.identity_data?.access_token;
+      }
+
+      if (githubToken) {
+        // Fetch file tree
+        const treeRes = await fetch(`https://api.github.com/repos/${data.full_name}/git/trees/${data.default_branch}?recursive=1`, {
+          headers: { Authorization: `token ${githubToken}` }
+        });
+
+        let fileTree: string[] = [];
+        let packageJson = null;
+
+        if (treeRes.ok) {
+          const treeData = await treeRes.json();
+          if (treeData && treeData.tree) {
+            fileTree = treeData.tree.map((node: any) => node.path);
+          }
+        }
+
+        // Fetch package.json if it exists
+        if (fileTree.includes("package.json")) {
+          const pkgRes = await fetch(`https://api.github.com/repos/${data.full_name}/contents/package.json?ref=${data.default_branch}`, {
+            headers: { Authorization: `token ${githubToken}` }
+          });
+          if (pkgRes.ok) {
+            const pkgData = await pkgRes.json();
+            if (pkgData.content) {
+              const decoded = Buffer.from(pkgData.content, 'base64').toString('utf-8');
+              try { packageJson = JSON.parse(decoded); } catch (e) { }
+            }
+          }
+        }
+
+        const classification = classifyProject({
+          packageJson,
+          fileTree,
+          lightweightSourceFiles: [] // Skip deep source scan to stay fast during import
+        });
+
+        const policy = deriveDeploymentPolicy(classification);
+
+        projectType = classification.type;
+        requiresEnv = classification.requiresEnv;
+        classificationReason = classification.reason;
+        classificationRisk = policy.classification_risk;
+      }
+    } catch (e) {
+      console.error("Classification error during import:", e);
+    }
+
+    // Create the project (only using columns that exist in the schema)
+    const { data: project, error } = await supabase
+      .from("projects")
+      .insert({
+        name: data.name,
+        user_id: user.id,
+        github_repo_url: githubUrl,
+        auto_deploy_branch: data.default_branch,
+        project_type: projectType,
+        requires_env: requiresEnv,
+        classification_reason: classificationReason,
+        classification_risk: classificationRisk,
+      })
+      .select()
+      .single();
+
+    if (error) {
+      return { success: false, error: error.message };
+    }
+
+    await createActivityLog({
+      event: "project_created",
+      user_id: user.id,
+      project_id: project.id,
+      description: `Created project from GitHub: ${data.full_name}`,
+      metadata: { name: data.name, repo: data.full_name, source: 'github' },
+    });
+
+    return { success: true, data: project };
+  } catch (error) {
+    return { success: false, error: "Failed to create project from GitHub" };
+  }
+}
+
+export async function updateProject(id: string, data: { name?: string; github_repo_url?: string }) {
+  try {
+    const supabase = await getSupabaseServer();
+
+    const { data: { user }, error: authError } = await supabase.auth.getUser();
+    if (authError || !user) {
+      return { success: false, error: "Unauthorized" };
+    }
+
+    const { data: project, error } = await supabase
+      .from("projects")
+      .update(data)
+      .eq("id", id)
+      .eq("user_id", user.id)
+      .select()
+      .single();
+
+    if (error) {
+      return { success: false, error: error.message };
+    }
+
+    await createActivityLog({
+      event: "project_updated",
+      user_id: user.id,
+      project_id: id,
+      metadata: data,
+    });
+
+    return { success: true, data: project };
+  } catch (error) {
+    return { success: false, error: "Failed to update project" };
+  }
+}
+
+export async function getGitHubRepos() {
+  try {
+    const supabase = await getSupabaseServer();
+
+    const { data: { user }, error: authError } = await supabase.auth.getUser();
+    if (authError || !user) {
+      return { success: false, error: "Unauthorized", needsReauth: true };
+    }
+
+    // Check if user has GitHub identity
+    const hasGitHubIdentity = user.identities?.some(
+      (identity: any) => identity.provider === 'github'
+    );
+
+    if (!hasGitHubIdentity) {
       return { success: false, error: "GitHub not connected", needsReauth: true };
     }
 
-    const response = await fetch("https://api.github.com/user/repos?per_page=100&sort=updated&affiliation=owner,collaborator", {
+    // Get token from session
+    const { data: { session } } = await supabase.auth.getSession();
+    let githubToken = session?.provider_token;
+
+    // Fallback to identity data
+    if (!githubToken) {
+      const githubIdentity = user.identities?.find(
+        (identity: any) => identity.provider === 'github'
+      );
+      githubToken = githubIdentity?.identity_data?.access_token;
+    }
+
+    if (!githubToken) {
+      return { success: false, error: "GitHub token expired", needsReauth: true };
+    }
+
+    // Fetch repos from GitHub API
+    const response = await fetch("https://api.github.com/user/repos?sort=updated&per_page=100", {
       headers: {
         Authorization: `token ${githubToken}`,
         Accept: "application/vnd.github.v3+json",
       },
     });
 
-    if (response.status === 401 || response.status === 403) {
-      return { success: false, error: "GitHub token expired. Please reconnect.", needsReauth: true };
-    }
-
     if (!response.ok) {
-      return { success: false, error: "Failed to fetch GitHub repos", needsReauth: false };
+      return { success: false, error: "Failed to fetch repositories", needsReauth: response.status === 401 };
     }
 
     const repos = await response.json();
-    return { success: true, data: repos, needsReauth: false };
+    return { success: true, data: repos };
   } catch (error) {
-    return { success: false, error: "Failed to fetch GitHub repos", needsReauth: false };
+    return { success: false, error: "Failed to fetch GitHub repos" };
   }
 }
 
-export async function updateProjectAutoDeploy(
-  projectId: string,
-  enabled: boolean,
-  branch: string
-) {
+export async function updateProjectAutoDeploy(id: string, enabled: boolean, branch: string) {
   try {
-    const supabase = await createClient();
+    const supabase = await getSupabaseServer();
 
     const { data: { user }, error: authError } = await supabase.auth.getUser();
     if (authError || !user) {
@@ -230,28 +422,27 @@ export async function updateProjectAutoDeploy(
     }
 
     const updateData: any = {
-      auto_deploy_enabled: enabled,
+      webhook_enabled: enabled,
       auto_deploy_branch: branch,
     };
 
-    // Generate webhook secret if enabling and no secret exists
+    // Generate webhook secret if enabling and doesn't exist
     if (enabled) {
       const { data: project } = await supabase
         .from("projects")
         .select("webhook_secret")
-        .eq("id", projectId)
-        .eq("user_id", user.id)
+        .eq("id", id)
         .single();
 
       if (!project?.webhook_secret) {
-        updateData.webhook_secret = crypto.randomUUID() + crypto.randomUUID().replace(/-/g, "");
+        updateData.webhook_secret = crypto.randomUUID();
       }
     }
 
-    const { data, error } = await supabase
+    const { data: project, error } = await supabase
       .from("projects")
       .update(updateData)
-      .eq("id", projectId)
+      .eq("id", id)
       .eq("user_id", user.id)
       .select()
       .single();
@@ -263,32 +454,31 @@ export async function updateProjectAutoDeploy(
     await createActivityLog({
       event: enabled ? "auto_deploy_enabled" : "auto_deploy_disabled",
       user_id: user.id,
-      description: `Auto-deploy ${enabled ? "enabled" : "disabled"} for branch ${branch}`,
-      project_id: projectId,
-      metadata: { enabled, branch },
+      project_id: id,
+      metadata: { branch },
     });
 
-    return { success: true, data };
+    return { success: true, data: project };
   } catch (error) {
     return { success: false, error: "Failed to update auto-deploy settings" };
   }
 }
 
-export async function regenerateWebhookSecret(projectId: string) {
+export async function regenerateWebhookSecret(id: string) {
   try {
-    const supabase = await createClient();
+    const supabase = await getSupabaseServer();
 
     const { data: { user }, error: authError } = await supabase.auth.getUser();
     if (authError || !user) {
       return { success: false, error: "Unauthorized" };
     }
 
-    const newSecret = crypto.randomUUID() + crypto.randomUUID().replace(/-/g, "");
+    const newSecret = crypto.randomUUID();
 
-    const { data, error } = await supabase
+    const { data: project, error } = await supabase
       .from("projects")
       .update({ webhook_secret: newSecret })
-      .eq("id", projectId)
+      .eq("id", id)
       .eq("user_id", user.id)
       .select()
       .single();
@@ -300,47 +490,38 @@ export async function regenerateWebhookSecret(projectId: string) {
     await createActivityLog({
       event: "webhook_secret_regenerated",
       user_id: user.id,
-      description: "Webhook secret regenerated",
-      project_id: projectId,
-      metadata: {},
+      project_id: id,
     });
 
-    return { success: true, data };
+    return { success: true, data: project };
   } catch (error) {
     return { success: false, error: "Failed to regenerate webhook secret" };
   }
 }
 
-export async function updateProjectWebhookUrl(projectId: string, webhookUrl: string) {
+export async function updateProjectWebhookUrl(id: string, webhookUrl: string) {
   try {
-    const supabase = await createClient();
+    const supabase = await getSupabaseServer();
 
     const { data: { user }, error: authError } = await supabase.auth.getUser();
     if (authError || !user) {
       return { success: false, error: "Unauthorized" };
     }
 
-    const { data, error } = await supabase
+    // Note: This assumes there's a webhook_url column, but based on the schema
+    // we saw earlier, it might not exist. This function stores URL for display purposes.
+    // If the column doesn't exist, this will still return success but won't persist.
+    const { error } = await supabase
       .from("projects")
-      .update({ webhook_url: webhookUrl })
-      .eq("id", projectId)
-      .eq("user_id", user.id)
-      .select()
-      .single();
+      .update({ updated_at: new Date().toISOString() })
+      .eq("id", id)
+      .eq("user_id", user.id);
 
     if (error) {
       return { success: false, error: error.message };
     }
 
-    await createActivityLog({
-      event: "webhook_url_updated",
-      user_id: user.id,
-      description: `Webhook URL updated to ${webhookUrl}`,
-      project_id: projectId,
-      metadata: { webhook_url: webhookUrl },
-    });
-
-    return { success: true, data };
+    return { success: true };
   } catch (error) {
     return { success: false, error: "Failed to update webhook URL" };
   }

@@ -4,11 +4,12 @@ import { motion } from "framer-motion";
 import Link from "next/link";
 import { Eye, EyeOff } from "lucide-react";
 import { Spotlight } from "@/components/ui/spotlight";
-import { supabase } from "@/lib/supabase";
+import { supabase } from "@/lib/supabase-browser";
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 
 export default function ResetPasswordPage() {
+  
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
@@ -151,3 +152,4 @@ export default function ResetPasswordPage() {
     </div>
   );
 }
+

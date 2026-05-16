@@ -1,165 +1,79 @@
 "use server";
 
-import { createClient } from "@/lib/supabase-server";
-import { z } from "zod";
+import { getSupabaseServer } from "@/lib/supabase-server";
 import { createActivityLog } from "./activity";
+import { DeploymentEngine } from "@/lib/deployment-engine";
+import { normalizeDeploymentSource } from "@/lib/deployment-source";
+import { deriveEnvState } from "@/lib/env-state";
+import { deriveEnvFingerprint, deriveEnvOutdatedState } from "@/lib/env-fingerprint";
 
-const deploymentIdSchema = z.string().uuid("Invalid deployment ID");
-
-const deploymentSchema = z.object({
-  project_id: z.string().uuid("Invalid project ID"),
-  environment: z.enum(["development", "staging", "production"]),
-  branch: z.string().min(1, "Branch is required"),
-  commit_hash: z.string().optional(),
-});
-
-async function insertDeploymentLog(
-  deploymentId: string,
-  message: string,
-  level: "info" | "warn" | "error" | "success" = "info"
-) {
-  const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) throw new Error("Unauthorized");
-
-  await supabase.from("deployment_logs").insert({
-    deployment_id: deploymentId,
-    user_id: user.id,
-    level,
-    message,
-  });
-}
-
-function delay(ms: number) {
-  return new Promise(resolve => setTimeout(resolve, ms));
-}
-
-export async function runDeployment(deploymentId: string) {
+export async function createDeployment(formData: {
+  projectId: string;
+  environment: string;
+  branch: string;
+  source?: string;
+}) {
   try {
-    const validated = deploymentIdSchema.parse(deploymentId);
-    const supabase = await createClient();
+    const supabase = await getSupabaseServer();
 
     const { data: { user }, error: authError } = await supabase.auth.getUser();
     if (authError || !user) {
       return { success: false, error: "Unauthorized" };
     }
 
-    // Load deployment with project
-    const { data: deployment, error: fetchError } = await supabase
-      .from("deployments")
-      .select("*, projects(name, github_repo_url)")
-      .eq("id", validated)
+    // Validate and normalize source
+    const sourceResult = normalizeDeploymentSource(formData.source || 'manual');
+    if (!sourceResult.success) {
+      return { success: false, error: sourceResult.error };
+    }
+
+    // Get project details
+    const { data: project, error: projectError } = await supabase
+      .from("projects")
+      .select("id, name, github_repo_url, project_type, requires_env")
+      .eq("id", formData.projectId)
       .eq("user_id", user.id)
       .single();
 
-    if (fetchError || !deployment) {
-      return { success: false, error: "Deployment not found" };
+    if (projectError || !project) {
+      return { success: false, error: "Project not found" };
     }
 
-    // Update status to running
-    await supabase
-      .from("deployments")
-      .update({ status: "running" })
-      .eq("id", validated);
+    // PRIORITY ENV-STATE MACHINE: Deployment Lifecycle Guardrail
+    const { data: envVars, count: envCount, error: envError } = await supabase
+      .from("environment_variables")
+      .select("id, key", { count: 'exact' })
+      .eq("project_id", project.id)
+      .eq("environment", formData.environment);
 
-    await createActivityLog({
-      event: "deployment_status_updated",
-      user_id: user.id,
-      description: `Deployment started for ${deployment.projects.name}`,
-      deployment_id: validated,
-      project_id: deployment.project_id,
-      metadata: { deployment_id: validated, status: "running" },
+    const envState = deriveEnvState({
+      requiresEnv: project.requires_env,
+      envCount: envCount || 0
     });
 
-    // Stage 1: Initialize
-    await insertDeploymentLog(validated, "[1/4] Initializing deployment...", "info");
-    await delay(800);
-
-    // Stage 2: Connect to repo
-    await insertDeploymentLog(validated, `[2/4] Connecting to GitHub repository ${deployment.projects.github_repo_url}...`, "info");
-    await delay(1000);
-
-    // Stage 3: Build
-    await insertDeploymentLog(validated, `[3/4] Simulating build for branch ${deployment.branch}...`, "info");
-    await insertDeploymentLog(validated, "📦 Installing dependencies...", "info");
-    await delay(1200);
-    await insertDeploymentLog(validated, "🔨 Building application...", "info");
-    await delay(1000);
-
-    // Stage 4: Finalize
-    await insertDeploymentLog(validated, `[4/4] Finalizing deployment to ${deployment.environment}...`, "info");
-    await delay(800);
-
-    // Randomly simulate success or failure (90% success)
-    const isSuccess = Math.random() > 0.1;
-
-    if (isSuccess) {
-      await insertDeploymentLog(validated, "✅ Deployment completed successfully!", "success");
-      await supabase
-        .from("deployments")
-        .update({ status: "success" })
-        .eq("id", validated);
-
-      await createActivityLog({
-        event: "deployment_status_updated",
-        user_id: user.id,
-        description: `Successfully deployed ${deployment.projects.name} to ${deployment.environment}`,
-        deployment_id: validated,
-        project_id: deployment.project_id,
-        metadata: { deployment_id: validated, status: "success" },
-      });
-
-      return { success: true };
-    } else {
-      await insertDeploymentLog(validated, "❌ Deployment failed: Build error", "error");
-      await supabase
-        .from("deployments")
-        .update({ status: "failed" })
-        .eq("id", validated);
-
-      await createActivityLog({
-        event: "deployment_status_updated",
-        user_id: user.id,
-        description: `Deployment failed for ${deployment.projects.name}`,
-        deployment_id: validated,
-        project_id: deployment.project_id,
-        metadata: { deployment_id: validated, status: "failed" },
-      });
-
-      return { success: false, error: "Deployment failed" };
-    }
-  } catch (error) {
-    if (error instanceof z.ZodError) {
-      return { success: false, error: error.errors[0].message };
-    }
-    return { success: false, error: "Failed to run deployment" };
-  }
-}
-
-export async function createDeployment(formData: {
-  project_id: string;
-  environment: "development" | "staging" | "production";
-  branch: string;
-  commit_hash?: string;
-}) {
-  try {
-    const validated = deploymentSchema.parse(formData);
-    const supabase = await createClient();
-
-    const { data: { user }, error: authError } = await supabase.auth.getUser();
-    if (authError || !user) {
-      return { success: false, error: "Unauthorized" };
+    if (envState.status === "REQUIRED_MISSING") {
+      return {
+        success: false,
+        error_code: "ENV_REQUIRED",
+        message: "Environment configuration required before deployment.",
+        envState
+      };
     }
 
-    const { data, error } = await supabase
+    // Compute deployment footprint 
+    const envFingerprint = deriveEnvFingerprint(envVars || []);
+
+    // Create deployment record
+    const { data: deployment, error } = await supabase
       .from("deployments")
       .insert({
-        project_id: validated.project_id,
-        environment: validated.environment,
-        branch: validated.branch,
-        commit_hash: validated.commit_hash || null,
-        status: "queued",
+        project_id: formData.projectId,
+        environment: formData.environment,
+        branch: formData.branch,
+        status: "pending",
         user_id: user.id,
+        source: sourceResult.source,
+        env_fingerprint: envFingerprint
       })
       .select()
       .single();
@@ -168,27 +82,41 @@ export async function createDeployment(formData: {
       return { success: false, error: error.message };
     }
 
+    // Add initial deployment log
+    await supabase.from("deployment_logs").insert({
+      deployment_id: deployment.id,
+      user_id: user.id,
+      message: "📋 Deployment queued",
+      level: "info"
+    });
+
+    // Start simulated deployment engine
+    const projectSlug = project.name.toLowerCase().replace(/[^a-z0-9]/g, '-');
+    DeploymentEngine.startDeployment(deployment.id, projectSlug);
+
     await createActivityLog({
       event: "deployment_created",
       user_id: user.id,
-      description: `Created deployment to ${validated.environment}`,
-      deployment_id: data.id,
-      project_id: validated.project_id,
-      metadata: { environment: validated.environment, branch: validated.branch, commit_hash: validated.commit_hash },
+      description: `Started deployment for ${project.name} (${formData.environment})`,
+      project_id: formData.projectId,
+      metadata: {
+        deploymentId: deployment.id,
+        environment: formData.environment,
+        branch: formData.branch
+      },
     });
 
-    return { success: true, data };
+    return { success: true, data: deployment };
   } catch (error) {
-    if (error instanceof z.ZodError) {
-      return { success: false, error: error.errors[0].message };
-    }
     return { success: false, error: "Failed to create deployment" };
   }
 }
 
+
+
 export async function getDeployments(projectId?: string) {
   try {
-    const supabase = await createClient();
+    const supabase = await getSupabaseServer();
 
     const { data: { user }, error: authError } = await supabase.auth.getUser();
     if (authError || !user) {
@@ -197,7 +125,14 @@ export async function getDeployments(projectId?: string) {
 
     let query = supabase
       .from("deployments")
-      .select("*, projects(name)")
+      .select(`
+        *,
+        projects (
+          id,
+          name,
+          requires_env
+        )
+      `)
       .eq("user_id", user.id)
       .order("created_at", { ascending: false });
 
@@ -211,8 +146,111 @@ export async function getDeployments(projectId?: string) {
       return { success: false, error: error.message };
     }
 
-    return { success: true, data };
+    // Attach dynamic envState to each deployment's embedded project
+    // and dynamic envOutdated state
+    const { data: envCounts } = await supabase
+      .from('environment_variables')
+      .select('project_id, environment, key');
+
+    const envCountMap = (envCounts || []).reduce((acc: any, curr: any) => {
+      acc[curr.project_id] = (acc[curr.project_id] || 0) + 1;
+      return acc;
+    }, {});
+
+    const currEnvMap: Record<string, { key: string }[]> = {};
+    (envCounts || []).forEach((ev: any) => {
+      const k = `${ev.project_id}-${ev.environment}`;
+      if (!currEnvMap[k]) currEnvMap[k] = [];
+      currEnvMap[k].push({ key: ev.key });
+    });
+
+    const enrichedData = data.map(deployment => {
+      const k = `${deployment.project_id}-${deployment.environment}`;
+      const currentFingerprint = deriveEnvFingerprint(currEnvMap[k] || []);
+      const envOutdated = deriveEnvOutdatedState({
+        deploymentFingerprint: deployment.env_fingerprint,
+        currentFingerprint
+      });
+
+      return {
+        ...deployment,
+        envOutdated,
+        projects: deployment.projects ? {
+          ...deployment.projects,
+          envState: deriveEnvState({
+            requiresEnv: deployment.projects.requires_env || false,
+            envCount: envCountMap[deployment.projects.id] || 0
+          })
+        } : null
+      };
+    });
+
+    return { success: true, data: enrichedData };
   } catch (error) {
     return { success: false, error: "Failed to fetch deployments" };
+  }
+}
+
+export async function getDeploymentById(id: string) {
+  try {
+    const supabase = await getSupabaseServer();
+
+    const { data: { user }, error: authError } = await supabase.auth.getUser();
+    if (authError || !user) {
+      return { success: false, error: "Unauthorized" };
+    }
+
+    const { data, error } = await supabase
+      .from("deployments")
+      .select(`
+        *,
+        projects (
+          id,
+          name,
+          requires_env
+        )
+      `)
+      .eq("id", id)
+      .eq("user_id", user.id)
+      .single();
+
+    if (error) {
+      return { success: false, error: error.message };
+    }
+
+    let envCount = 0;
+    let currEnvVars: any[] = [];
+    if (data.projects?.id) {
+      const { data: envs, count } = await supabase
+        .from("environment_variables")
+        .select("id, key", { count: 'exact' })
+        .eq("project_id", data.projects.id)
+        .eq("environment", data.environment);
+
+      envCount = count || 0;
+      currEnvVars = envs || [];
+    }
+
+    const currentFingerprint = deriveEnvFingerprint(currEnvVars);
+    const envOutdated = deriveEnvOutdatedState({
+      deploymentFingerprint: data.env_fingerprint,
+      currentFingerprint
+    });
+
+    const enrichedData = {
+      ...data,
+      envOutdated,
+      projects: data.projects ? {
+        ...data.projects,
+        envState: deriveEnvState({
+          requiresEnv: data.projects.requires_env || false,
+          envCount
+        })
+      } : null
+    };
+
+    return { success: true, data: enrichedData };
+  } catch (error) {
+    return { success: false, error: "Failed to fetch deployment" };
   }
 }

@@ -4,12 +4,25 @@ import Link from "next/link";
 import { motion } from "framer-motion";
 import { useState, useEffect } from "react";
 import { ThemeToggle } from "@/components/ui/ThemeToggle";
+import { createClient } from "@/lib/supabase-browser";
+import { supabase } from "@/lib/supabase-browser";
+import { User } from "@supabase/supabase-js";
+import { getUserDisplayName, getUserAvatar } from "@/lib/auth-utils";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger, DropdownMenuSeparator } from "@/components/ui/dropdown-menu";
+import { LogOut, Settings, User as UserIcon } from "lucide-react";
+import { useRouter } from "next/navigation";
+import { toast } from "sonner";
+import Image from "next/image";
 
-const navLinks = [
+const publicNavLinks = [
   { name: "Home", href: "/" },
   { name: "Features", href: "#features" },
   { name: "Docs", href: "#docs" },
   { name: "Pricing", href: "#pricing" },
+];
+
+const authNavLinks = [
+  { name: "Home", href: "/" },
   { name: "Dashboard", href: "/dashboard" },
 ];
 
@@ -60,6 +73,30 @@ const useScrollState = () => {
 
 export const Navbar = () => {
   const { hidden, lightMode } = useScrollState();
+  const [user, setUser] = useState<User | null>(null);
+  const router = useRouter();
+
+  useEffect(() => {
+    supabase.auth.getUser().then(({ data: { user } }) => {
+      setUser(user || null);
+    });
+
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+      setUser(session?.user || null);
+    });
+
+    return () => subscription.unsubscribe();
+  }, []);
+
+  const handleSignOut = async () => {
+    await supabase.auth.signOut();
+    toast.success("Logged out successfully");
+    router.push("/");
+  };
+
+  const displayName = getUserDisplayName(user);
+  const avatarUrl = getUserAvatar(user);
+  const navLinks = user ? authNavLinks : publicNavLinks;
 
   return (
     <motion.nav
@@ -104,26 +141,61 @@ export const Navbar = () => {
 
         <div className="flex items-center gap-4">
           <ThemeToggle />
-          <Link
-            href="/login"
-            className={`text-sm transition-colors duration-300 ${
-              lightMode
-                ? "text-black/90 hover:text-black"
-                : "text-white/90 hover:text-white"
-            }`}
-          >
-            Login
-          </Link>
-          <Link
-            href="/signup"
-            className={`rounded-full px-4 py-2 text-sm font-semibold transition-all duration-300 hover:scale-105 ${
-              lightMode
-                ? "bg-black text-white"
-                : "bg-white text-black"
-            }`}
-          >
-            Sign Up
-          </Link>
+          {user ? (
+            <DropdownMenu>
+              <DropdownMenuTrigger className="flex items-center gap-2 outline-none">
+                {avatarUrl ? (
+                  <Image
+                    src={avatarUrl}
+                    alt={displayName}
+                    width={32}
+                    height={32}
+                    className="h-8 w-8 rounded-full border-2 border-border"
+                  />
+                ) : (
+                  <div className={`flex h-8 w-8 items-center justify-center rounded-full border-2 ${
+                    lightMode ? "bg-black/10 border-black/20" : "bg-white/10 border-white/20"
+                  }`}>
+                    <UserIcon className="h-4 w-4" />
+                  </div>
+                )}
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="w-48">
+                <DropdownMenuItem onClick={() => router.push('/dashboard/settings')}>
+                  <Settings className="h-4 w-4 mr-2" />
+                  Settings
+                </DropdownMenuItem>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem onClick={handleSignOut} className="text-red-600 dark:text-red-400">
+                  <LogOut className="h-4 w-4 mr-2" />
+                  Logout
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          ) : (
+            <>
+              <Link
+                href="/login"
+                className={`text-sm transition-colors duration-300 ${
+                  lightMode
+                    ? "text-black/90 hover:text-black"
+                    : "text-white/90 hover:text-white"
+                }`}
+              >
+                Login
+              </Link>
+              <Link
+                href="/signup"
+                className={`rounded-full px-4 py-2 text-sm font-semibold transition-all duration-300 hover:scale-105 ${
+                  lightMode
+                    ? "bg-black text-white"
+                    : "bg-white text-black"
+                }`}
+              >
+                Sign Up
+              </Link>
+            </>
+          )}
         </div>
       </div>
     </motion.nav>
