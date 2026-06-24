@@ -8,7 +8,7 @@ npm install @radix-ui/react-tabs @radix-ui/react-alert-dialog
 ```
 
 ### 2. Run SQL Migration
-Copy and run `migration-password-view-otps.sql` in Supabase SQL Editor
+Copy and run `database/migrations/migration-password-view-otps.sql` in Supabase SQL Editor
 
 ### 3. Start Dev Server
 ```bash

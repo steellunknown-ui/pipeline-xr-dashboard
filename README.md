@@ -55,7 +55,7 @@ Follow these instructions to get a local copy up and running.
    ```
 
 3. **Set up Environment Variables:**
-   Create a `.env.local` file at the root of the project and populate the required API keys and Supabase connection strings. (Refer to the `ENVIRONMENT_VARIABLES_SETUP.md` for specific schemas).
+   Create a `.env.local` file at the root of the project and populate the required API keys and Supabase connection strings. (Refer to the `docs/ENVIRONMENT_VARIABLES_SETUP.md` for specific schemas).
 
 4. **Run the build runner compiler:**
    Pipeline XR uses a custom detached runner that requires pre-compilation.
