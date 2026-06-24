@@ -122,9 +122,9 @@ export function ZipUploadModal({ fileInputRef }: ZipUploadModalProps) {
 
   async function handleDeploy() {
     if (!analysis) return;
-
-    // Show preflight warning before deploying
-    setShowPreflightWarning(true);
+    
+    // For ZIP uploads, we skip the preflight warning and deploy directly
+    executeDeploy();
   }
 
   async function executeDeploy() {
@@ -245,17 +245,6 @@ export function ZipUploadModal({ fileInputRef }: ZipUploadModalProps) {
           </div>
         </DialogContent>
       </Dialog>
-
-      {/* Pre-Deploy Warning Modal */}
-      {projectId && (
-        <PreDeployWarning
-          projectId={projectId}
-          source="zip"
-          onContinue={executeDeploy}
-          onCancel={cancelDeploy}
-          isVisible={showPreflightWarning}
-        />
-      )}
     </>
   );
 }

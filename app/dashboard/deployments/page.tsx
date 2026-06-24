@@ -11,7 +11,7 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useRouter } from "next/navigation";
 import { getProjects } from "../actions/projects";
-import { getDeployments, createDeployment } from "../actions/deployments";
+import { getDeployments, triggerVercelDeploy } from "../actions/deployments";
 import { runDeploymentPipeline } from "../actions/deployment-pipeline";
 import { toast } from "sonner";
 import type { DeploymentWithProject, Project } from "@/lib/types/database";
@@ -153,7 +153,7 @@ export default function DeploymentsPage() {
 
   async function executeNewDeployment() {
     setSubmitting(true);
-    const result = await createDeployment({
+    const result = await triggerVercelDeploy({
       projectId: formData.project_id,
       environment: formData.environment,
       branch: formData.branch

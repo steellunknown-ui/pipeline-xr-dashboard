@@ -37,39 +37,80 @@ export async function runDeploymentPipeline(deploymentId: string) {
     // Get deployment
     const { data: deployment } = await supabase
       .from("deployments")
-      .select("*, projects(name)")
+      .select("*, projects(id, name, github_repo_url)")
       .eq("id", deploymentId)
       .single();
 
-    if (!deployment) return { success: false, error: "Deployment not found" };
+    if (!deployment || !deployment.projects) return { success: false, error: "Deployment or Project not found" };
 
-    // Generate URL early
-    const projectSlug = deployment.projects.name.toLowerCase().replace(/[^a-z0-9]/g, '-');
-    const deploymentUrl = `https://${projectSlug}-${deployment.environment}.pipelinexr.app`;
+    if (!deployment.projects.github_repo_url) {
+      return { success: false, error: "Project has no GitHub repository connected. Cannot deploy to Vercel." };
+    }
 
     // Start deployment
     await supabase.from("deployments").update({ status: "building" }).eq("id", deploymentId);
-    await insertLogIfNew(deploymentId, user.id, "🚀 Build started", "info");
+    await insertLogIfNew(deploymentId, user.id, "🚀 Contacting Vercel...", "info");
 
-    await new Promise(resolve => setTimeout(resolve, 2000));
+    const vercelToken = process.env.VERCEL_API_TOKEN;
+    const teamId = process.env.VERCEL_TEAM_ID;
 
-    await insertLogIfNew(deploymentId, user.id, "📦 Installing dependencies...", "info");
-    await new Promise(resolve => setTimeout(resolve, 2000));
+    if (!vercelToken) {
+      return { success: false, error: "Vercel API token not configured." };
+    }
 
-    await insertLogIfNew(deploymentId, user.id, "🔨 Building application...", "info");
-    await new Promise(resolve => setTimeout(resolve, 2000));
+    // Extract owner/repo from URL
+    const repoMatch = deployment.projects.github_repo_url.match(/github\.com\/([^\/]+)\/([^\/]+)/);
+    if (!repoMatch) {
+      return { success: false, error: "Invalid GitHub repository URL format." };
+    }
+    const owner = repoMatch[1];
+    const repo = repoMatch[2];
 
-    // Complete with URL stored
-    await supabase.from("deployments").update({
-      status: "success",
-      deployment_url: deploymentUrl
-    }).eq("id", deploymentId);
+    const ghRes = await fetch(`https://api.github.com/repos/${owner}/${repo}`);
+    if (!ghRes.ok) {
+      return { success: false, error: "Failed to fetch repository details from GitHub API." };
+    }
+    const ghData = await ghRes.json();
+    const repoId = ghData.id.toString();
 
-    await insertLogIfNew(deploymentId, user.id, `🌐 Live at: ${deploymentUrl}`, "success");
-    await insertLogIfNew(deploymentId, user.id, "🎉 Deployment successful!", "success");
+    let vercelUrl = "https://api.vercel.com/v13/deployments";
+    if (teamId) {
+      vercelUrl += `?teamId=${teamId}`;
+    }
 
-    return { success: true, message: "Deployment completed successfully" };
-  } catch (error) {
+    const vercelRes = await fetch(vercelUrl, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${vercelToken}`,
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({
+        name: deployment.projects.name.toLowerCase().replace(/[^a-z0-9]/g, '-'),
+        gitSource: {
+          type: "github",
+          ref: deployment.branch,
+          repoId: repoId
+        }
+      })
+    });
+
+    const vercelData = await vercelRes.json();
+
+    if (!vercelRes.ok) {
+      await insertLogIfNew(deploymentId, user.id, `❌ Vercel error: ${vercelData.error?.message || 'Unknown error'}`, "error");
+      await supabase.from("deployments").update({ status: "failed" }).eq("id", deploymentId);
+      return { success: false, error: `Vercel Error: ${vercelData.error?.message || 'Unknown'}` };
+    }
+
+    await supabase
+      .from("deployments")
+      .update({ vercel_deployment_id: vercelData.id })
+      .eq("id", deploymentId);
+
+    await insertLogIfNew(deploymentId, user.id, "🚀 Deployment started on Vercel", "info");
+
+    return { success: true, message: "Deployment triggered on Vercel" };
+  } catch (error: any) {
     await supabase.from("deployments").update({ status: "failed" }).eq("id", deploymentId);
     console.error(`Deployment ${deploymentId} failed:`, error);
     return { success: false, error: "Deployment failed" };

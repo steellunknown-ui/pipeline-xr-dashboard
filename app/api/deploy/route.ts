@@ -1,0 +1,143 @@
+import { NextRequest, NextResponse } from "next/server";
+import { getSupabaseServer } from "@/lib/supabase-server";
+
+export async function POST(req: NextRequest) {
+  try {
+    const { deploymentId } = await req.json();
+
+    if (!deploymentId) {
+      return NextResponse.json({ error: "Missing deploymentId" }, { status: 400 });
+    }
+
+    const supabase = await getSupabaseServer();
+
+    // Get deployment details
+    const { data: deployment, error: fetchError } = await supabase
+      .from("deployments")
+      .select("*, projects(id, name)")
+      .eq("id", deploymentId)
+      .single();
+
+    if (fetchError || !deployment || !deployment.vercel_deployment_id) {
+      return NextResponse.json({ error: "Deployment not found or missing Vercel ID" }, { status: 404 });
+    }
+
+    const vercelToken = process.env.VERCEL_API_TOKEN;
+    const teamId = process.env.VERCEL_TEAM_ID;
+    
+    if (!vercelToken) {
+      return NextResponse.json({ error: "Vercel API token not configured" }, { status: 500 });
+    }
+
+    const vercelId = deployment.vercel_deployment_id;
+    // --- 1. Fetch deployment events (logs) from Vercel ---
+    let logsUrl = `https://api.vercel.com/v2/deployments/${vercelId}/events`;
+    if (teamId) logsUrl += `?teamId=${teamId}`;
+
+    // Get the latest log timestamp from our DB to avoid duplicates
+    const { data: latestLog } = await supabase
+      .from("deployment_logs")
+      .select("created_at")
+      .eq("deployment_id", deploymentId)
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .single();
+
+    const since = latestLog ? new Date(latestLog.created_at).getTime() : 0;
+    if (since > 0) {
+      logsUrl += (teamId ? "&" : "?") + `since=${since}`;
+    }
+
+    const logsRes = await fetch(logsUrl, {
+      headers: { Authorization: `Bearer ${vercelToken}` },
+    });
+
+    if (logsRes.ok) {
+      const logsData = await logsRes.json();
+      if (Array.isArray(logsData)) {
+        const newLogs = logsData
+          .filter(event => event.payload?.text)
+          .map(event => ({
+            deployment_id: deploymentId,
+            user_id: deployment.user_id,
+            message: event.payload.text,
+            level: event.type === "error" ? "error" : "info",
+            created_at: new Date(event.created).toISOString()
+          }));
+
+        if (newLogs.length > 0) {
+          // Insert logs in bulk
+          await supabase.from("deployment_logs").insert(newLogs);
+        }
+      }
+    }
+
+    // --- 2. Check deployment status ---
+    let url = `https://api.vercel.com/v13/deployments/${vercelId}`;
+    if (teamId) url += `?teamId=${teamId}`;
+
+    const res = await fetch(url, {
+      headers: { Authorization: `Bearer ${vercelToken}` },
+    });
+
+    if (!res.ok) {
+      return NextResponse.json({ error: "Failed to fetch from Vercel" }, { status: res.status });
+    }
+
+    const vercelData = await res.json();
+    const state = vercelData.readyState; // QUEUED, BUILDING, READY, ERROR, CANCELED
+
+    let newStatus = deployment.status;
+    let logMessage = null;
+    let level = "info";
+
+    if (state === "READY") {
+      newStatus = "success";
+      logMessage = "✅ Deployment completed successfully";
+      level = "success";
+    } else if (state === "ERROR") {
+      newStatus = "failed";
+      logMessage = `❌ Deployment failed: ${vercelData.errorMessage || 'Unknown error'}`;
+      level = "error";
+    } else if (state === "CANCELED") {
+      newStatus = "cancelled";
+      logMessage = "⚠️ Deployment canceled";
+      level = "warn";
+    } else if (state === "BUILDING" && deployment.status !== "building") {
+      newStatus = "building";
+      logMessage = "⚙️ Deployment building...";
+    }
+
+    // Update deployment in DB
+    const updateData: any = { status: newStatus };
+    if (state === "READY" && vercelData.url) {
+      updateData.deployment_url = `https://${vercelData.url}`;
+    }
+
+    await supabase
+      .from("deployments")
+      .update(updateData)
+      .eq("id", deploymentId);
+
+    // Insert status change log if status changed
+    if (logMessage) {
+      await supabase.from("deployment_logs").insert({
+        deployment_id: deploymentId,
+        user_id: deployment.user_id,
+        message: logMessage,
+        level: level
+      });
+    }
+
+    return NextResponse.json({ 
+      success: true, 
+      state,
+      status: newStatus,
+      deployment_url: updateData.deployment_url 
+    });
+
+  } catch (error: any) {
+    console.error("Polling error:", error);
+    return NextResponse.json({ error: error.message }, { status: 500 });
+  }
+}

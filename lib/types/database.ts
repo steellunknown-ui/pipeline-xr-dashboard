@@ -25,6 +25,7 @@ export type Deployment = {
   commit_sha?: string | null;
   source?: "github" | "zip" | "manual";
   deployment_url?: string | null;
+  vercel_deployment_id?: string | null;
   status: "pending" | "building" | "success" | "failed" | "cancelled";
   created_at: string;
   env_fingerprint?: string | null;

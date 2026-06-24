@@ -62,6 +62,40 @@ export default function DeploymentLogsPage() {
   }, [deploymentId]);
 
   useEffect(() => {
+    if (!deployment || !deployment.vercel_deployment_id) return;
+    if (deployment.status !== "pending" && deployment.status !== "building") return;
+
+    let pollCount = 0;
+    const maxPolls = 200; // 10 minutes (3s * 200)
+
+    const interval = setInterval(async () => {
+      pollCount++;
+      if (pollCount > maxPolls) {
+        clearInterval(interval);
+        return;
+      }
+      try {
+        const res = await fetch('/api/deploy', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ deploymentId })
+        });
+        const data = await res.json();
+        
+        if (data.status && data.status !== deployment.status) {
+          setDeployment((prev: any) => prev ? { ...prev, status: data.status, deployment_url: data.deployment_url || prev.deployment_url } : prev);
+        }
+        
+        if (data.state === 'READY' || data.state === 'ERROR' || data.state === 'CANCELED') {
+          clearInterval(interval);
+        }
+      } catch (err) {}
+    }, 3000);
+
+    return () => clearInterval(interval);
+  }, [deployment?.vercel_deployment_id, deployment?.status, deploymentId]);
+
+  useEffect(() => {
     logsEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [logs]);
 
@@ -164,9 +198,16 @@ export default function DeploymentLogsPage() {
         <div className="flex-1">
           <h1 className="text-3xl font-bold">Deployment Logs</h1>
           {deployment && (
-            <p className="text-muted-foreground mt-1">
-              {deployment.projects?.name} • {deployment.branch} • {deployment.environment}
-            </p>
+            <div className="mt-1 space-y-1">
+              <p className="text-muted-foreground">
+                {deployment.projects?.name} • {deployment.branch} • {deployment.environment}
+              </p>
+              {deployment.deployment_url && (
+                <a href={deployment.deployment_url} target="_blank" rel="noopener noreferrer" className="text-sm text-blue-500 hover:underline flex items-center gap-1">
+                  {deployment.deployment_url}
+                </a>
+              )}
+            </div>
           )}
         </div>
         <div className="flex items-center gap-2">

@@ -10,7 +10,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Plus, GitBranch, Calendar, Trash2, Settings, Rocket, Github } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { createProject, getProjects, deleteProject } from "../actions";
-import { createDeployment } from "../actions/deployments";
+import { triggerVercelDeploy } from "../actions/deployments";
 import { toast } from "sonner";
 import type { Project } from "@/lib/types/database";
 import { GradientBar } from "@/components/ui/gradient-bar";
@@ -89,7 +89,7 @@ export default function ProjectsPage() {
     setDeployingProjects(prev => new Set([...prev, projectId]));
 
     try {
-      const result = await createDeployment({
+      const result = await triggerVercelDeploy({
         projectId,
         environment: 'development',
         branch: 'main'

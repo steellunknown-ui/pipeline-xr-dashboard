@@ -113,6 +113,177 @@ export async function createDeployment(formData: {
 }
 
 
+export async function triggerVercelDeploy(formData: {
+  projectId: string;
+  environment: string;
+  branch: string;
+}) {
+  try {
+    const supabase = await getSupabaseServer();
+
+    const { data: { user }, error: authError } = await supabase.auth.getUser();
+    if (authError || !user) {
+      return { success: false, error: "Unauthorized" };
+    }
+
+    // Get project details
+    const { data: project, error: projectError } = await supabase
+      .from("projects")
+      .select("id, name, github_repo_url, project_type, requires_env")
+      .eq("id", formData.projectId)
+      .eq("user_id", user.id)
+      .single();
+
+    if (projectError || !project) {
+      return { success: false, error: "Project not found" };
+    }
+
+    if (!project.github_repo_url) {
+      return { success: false, error: "Project has no GitHub repository connected. Cannot deploy to Vercel." };
+    }
+
+    // PRIORITY ENV-STATE MACHINE
+    const { data: envVars, count: envCount } = await supabase
+      .from("environment_variables")
+      .select("id, key", { count: 'exact' })
+      .eq("project_id", project.id)
+      .eq("environment", formData.environment);
+
+    const envState = deriveEnvState({
+      requiresEnv: project.requires_env,
+      envCount: envCount || 0
+    });
+
+    if (envState.status === "REQUIRED_MISSING") {
+      return {
+        success: false,
+        error_code: "ENV_REQUIRED",
+        message: "Environment configuration required before deployment.",
+        envState
+      };
+    }
+
+    const envFingerprint = deriveEnvFingerprint(envVars || []);
+
+    // Create deployment record
+    const { data: deployment, error } = await supabase
+      .from("deployments")
+      .insert({
+        project_id: formData.projectId,
+        environment: formData.environment,
+        branch: formData.branch,
+        status: "pending",
+        user_id: user.id,
+        source: "github",
+        env_fingerprint: envFingerprint
+      })
+      .select()
+      .single();
+
+    if (error) {
+      return { success: false, error: error.message };
+    }
+
+    // Log: Queueing
+    await supabase.from("deployment_logs").insert({
+      deployment_id: deployment.id,
+      user_id: user.id,
+      message: "📋 Deployment queued, contacting Vercel...",
+      level: "info"
+    });
+
+    // Vercel API Call
+    const vercelToken = process.env.VERCEL_API_TOKEN;
+    const teamId = process.env.VERCEL_TEAM_ID;
+
+    if (!vercelToken) {
+      return { success: false, error: "Vercel API token not configured." };
+    }
+
+    // Extract owner/repo from URL
+    const repoMatch = project.github_repo_url.match(/github\.com\/([^\/]+)\/([^\/]+)/);
+    if (!repoMatch) {
+      return { success: false, error: "Invalid GitHub repository URL format." };
+    }
+    const owner = repoMatch[1];
+    const repo = repoMatch[2];
+
+    // We must get the numeric repoId from GitHub API
+    const ghRes = await fetch(`https://api.github.com/repos/${owner}/${repo}`);
+    if (!ghRes.ok) {
+      return { success: false, error: "Failed to fetch repository details from GitHub API." };
+    }
+    const ghData = await ghRes.json();
+    const repoId = ghData.id.toString();
+
+    // Call Vercel POST /v13/deployments
+    let vercelUrl = "https://api.vercel.com/v13/deployments";
+    if (teamId) {
+      vercelUrl += `?teamId=${teamId}`;
+    }
+
+    const vercelRes = await fetch(vercelUrl, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${vercelToken}`,
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({
+        name: project.name.toLowerCase().replace(/[^a-z0-9]/g, '-'),
+        gitSource: {
+          type: "github",
+          ref: formData.branch,
+          repoId: repoId
+        }
+      })
+    });
+
+    const vercelData = await vercelRes.json();
+
+    if (!vercelRes.ok) {
+      await supabase.from("deployment_logs").insert({
+        deployment_id: deployment.id,
+        user_id: user.id,
+        message: `❌ Vercel error: ${vercelData.error?.message || 'Unknown error'}`,
+        level: "error"
+      });
+      await supabase.from("deployments").update({ status: "failed" }).eq("id", deployment.id);
+      return { success: false, error: `Vercel Error: ${vercelData.error?.message || 'Unknown'}` };
+    }
+
+    // Save vercel_deployment_id to Supabase
+    await supabase
+      .from("deployments")
+      .update({ vercel_deployment_id: vercelData.id })
+      .eq("id", deployment.id);
+
+    // Initial success log
+    await supabase.from("deployment_logs").insert({
+      deployment_id: deployment.id,
+      user_id: user.id,
+      message: "🚀 Deployment started on Vercel",
+      level: "info"
+    });
+
+    await createActivityLog({
+      event: "deployment_created",
+      user_id: user.id,
+      description: `Started Vercel deployment for ${project.name} (${formData.environment})`,
+      project_id: formData.projectId,
+      metadata: {
+        deploymentId: deployment.id,
+        vercelDeploymentId: vercelData.id,
+        environment: formData.environment,
+        branch: formData.branch
+      },
+    });
+
+    return { success: true, data: deployment };
+  } catch (error: any) {
+    return { success: false, error: error.message || "Failed to trigger Vercel deployment" };
+  }
+}
+
 
 export async function getDeployments(projectId?: string) {
   try {
