@@ -1,70 +1,4 @@
-interface FailureRule {
-  pattern: RegExp;
-  type: string;
-  confidence: number;
-  shortReason: string;
-  detailedReason: string;
-  probableCause: string;
-}
-
-const FAILURE_RULES: FailureRule[] = [
-  {
-    pattern: /module not found|cannot find module|cannot resolve/i,
-    type: 'BUILD_ERROR',
-    confidence: 0.9,
-    shortReason: 'Missing dependency or module',
-    detailedReason: 'The build process failed because a required module or dependency could not be found. This usually happens when a package is not installed or the import path is incorrect.',
-    probableCause: 'Missing npm package or incorrect import statement'
-  },
-  {
-    pattern: /npm err!|yarn error|pnpm err/i,
-    type: 'INSTALL_ERROR',
-    confidence: 0.85,
-    shortReason: 'Package installation failed',
-    detailedReason: 'The package manager (npm/yarn/pnpm) encountered an error while installing dependencies. This could be due to network issues, version conflicts, or corrupted package files.',
-    probableCause: 'Package manager installation failure'
-  },
-  {
-    pattern: /missing environment variable|env.*not.*defined|undefined.*env/i,
-    type: 'ENV_ERROR',
-    confidence: 0.9,
-    shortReason: 'Missing environment variables',
-    detailedReason: 'The application requires environment variables that are not defined. These variables are needed for configuration, API keys, or database connections.',
-    probableCause: 'Required environment variables not set'
-  },
-  {
-    pattern: /permission denied|eacces|access denied/i,
-    type: 'PERMISSION_ERROR',
-    confidence: 0.8,
-    shortReason: 'File permission error',
-    detailedReason: 'The deployment process does not have sufficient permissions to read, write, or execute required files or directories.',
-    probableCause: 'Insufficient file system permissions'
-  },
-  {
-    pattern: /port.*already.*use|eaddrinuse|address already in use/i,
-    type: 'PORT_ERROR',
-    confidence: 0.9,
-    shortReason: 'Port already in use',
-    detailedReason: 'The application cannot start because the specified port is already being used by another process.',
-    probableCause: 'Port conflict with existing service'
-  },
-  {
-    pattern: /syntax error|unexpected token|parse error/i,
-    type: 'SYNTAX_ERROR',
-    confidence: 0.85,
-    shortReason: 'Code syntax error',
-    detailedReason: 'The code contains syntax errors that prevent it from being parsed or compiled correctly.',
-    probableCause: 'Invalid JavaScript/TypeScript syntax'
-  },
-  {
-    pattern: /timeout|timed out|connection timeout/i,
-    type: 'TIMEOUT_ERROR',
-    confidence: 0.7,
-    shortReason: 'Operation timeout',
-    detailedReason: 'A network operation or build process took too long to complete and was terminated.',
-    probableCause: 'Network connectivity or performance issues'
-  }
-];
+import { analyzeAI } from "./ai-client";
 
 export interface DeploymentAnalysis {
   failure_type: string;
@@ -73,123 +7,202 @@ export interface DeploymentAnalysis {
   probable_cause: string;
   fix_steps: string[];
   confidence: number;
+  ai_powered: boolean;
 }
 
-export function analyzeFailure(logs: string[], source: string): DeploymentAnalysis {
-  const logText = logs.join(' ').toLowerCase();
-  
-  // Check if logs are empty
-  if (!logs.length || logText.trim() === '') {
+const FAILURE_RULES = [
+  {
+    pattern: /module not found|cannot find module|cannot resolve/i,
+    type: "BUILD_ERROR",
+    confidence: 0.9,
+    shortReason: "Missing dependency or module",
+    detailedReason: "The build failed because a required module couldn't be found. Usually a missing npm package or wrong import path.",
+    probableCause: "Missing npm package or incorrect import statement",
+  },
+  {
+    pattern: /npm err!|yarn error|pnpm err/i,
+    type: "INSTALL_ERROR",
+    confidence: 0.85,
+    shortReason: "Package installation failed",
+    detailedReason: "The package manager hit an error while installing dependencies. Could be network issues, version conflicts, or corrupted packages.",
+    probableCause: "Package manager installation failure",
+  },
+  {
+    pattern: /missing environment variable|env.*not.*defined|undefined.*env/i,
+    type: "ENV_ERROR",
+    confidence: 0.9,
+    shortReason: "Missing environment variables",
+    detailedReason: "The app needs environment variables that aren't defined. These are usually API keys or database URLs.",
+    probableCause: "Required environment variables not set",
+  },
+  {
+    pattern: /permission denied|eacces|access denied/i,
+    type: "PERMISSION_ERROR",
+    confidence: 0.8,
+    shortReason: "File permission error",
+    detailedReason: "The deployment process doesn't have permission to read/write required files.",
+    probableCause: "Insufficient file system permissions",
+  },
+  {
+    pattern: /syntax error|unexpected token|parse error/i,
+    type: "SYNTAX_ERROR",
+    confidence: 0.85,
+    shortReason: "Code syntax error",
+    detailedReason: "The code contains syntax errors that prevent it from being parsed or compiled.",
+    probableCause: "Invalid JavaScript/TypeScript syntax",
+  },
+  {
+    pattern: /timeout|timed out|connection timeout/i,
+    type: "TIMEOUT_ERROR",
+    confidence: 0.7,
+    shortReason: "Operation timed out",
+    detailedReason: "A network operation or build process took too long and was killed.",
+    probableCause: "Network connectivity or performance issues",
+  },
+  {
+    pattern: /out of memory|heap out of memory|oom/i,
+    type: "MEMORY_ERROR",
+    confidence: 0.9,
+    shortReason: "Out of memory",
+    detailedReason: "The build process ran out of RAM. This usually happens with very large projects or memory leaks.",
+    probableCause: "Insufficient memory during build",
+  },
+];
+
+const FIX_STEPS: Record<string, string[]> = {
+  BUILD_ERROR: [
+    "Check all imports match installed package names exactly",
+    "Run `npm install` locally and check for errors",
+    "Verify import paths are correct and case-sensitive",
+  ],
+  INSTALL_ERROR: [
+    "Delete `node_modules` and `package-lock.json`",
+    "Run `npm install` again",
+    "Check for conflicting dependency versions in package.json",
+  ],
+  ENV_ERROR: [
+    "Go to your project settings → Environment tab",
+    "Add the missing environment variables",
+    "Redeploy after adding the variables",
+  ],
+  PERMISSION_ERROR: [
+    "Check file permissions in your repository",
+    "Ensure build scripts have execute permissions",
+    "Verify deployment has write access to required directories",
+  ],
+  SYNTAX_ERROR: [
+    "Review recent code changes for typos or missing brackets",
+    "Run the code locally to identify the exact error",
+    "Check all JSON config files are valid",
+  ],
+  TIMEOUT_ERROR: [
+    "Check for infinite loops or blocking operations",
+    "Optimize the build process to reduce time",
+    "Check network connectivity for any external dependencies",
+  ],
+  MEMORY_ERROR: [
+    "Add `NODE_OPTIONS=--max-old-space-size=4096` to your build command",
+    "Check for memory leaks in your application",
+    "Optimize imports to reduce bundle size",
+  ],
+  UNKNOWN_ERROR: [
+    "Review the full deployment logs for specific error messages",
+    "Test the build locally with `npm run build`",
+    "Check recent code changes that might have caused the issue",
+  ],
+};
+
+export async function analyzeFailure(
+  logs: string[],
+  source: string
+): Promise<DeploymentAnalysis> {
+  const logText = logs.join("\n");
+
+  if (!logs.length || logText.trim() === "") {
     return {
-      failure_type: 'UNKNOWN_ERROR',
-      short_reason: 'No error logs available',
-      detailed_reason: 'The deployment failed but no error logs were captured. This could indicate a system-level failure or logging configuration issue.',
-      probable_cause: 'Missing or incomplete logging',
-      fix_steps: generateFixSteps('UNKNOWN_ERROR', source),
-      confidence: 0.3
+      failure_type: "UNKNOWN_ERROR",
+      short_reason: "No logs captured",
+      detailed_reason: "The deployment failed but no logs were captured. This is usually a system-level failure.",
+      probable_cause: "Missing or incomplete logging",
+      fix_steps: FIX_STEPS.UNKNOWN_ERROR,
+      confidence: 0.3,
+      ai_powered: false,
     };
   }
 
-  // Apply rules in order of confidence
-  for (const rule of FAILURE_RULES.sort((a, b) => b.confidence - a.confidence)) {
-    if (rule.pattern.test(logText)) {
+  // 1. Try AI analysis first (Nemotron 3 Super — 1M context window eats logs whole)
+  try {
+    const recentLogs = logs.slice(-120).join("\n");
+
+    const content = await analyzeAI(
+      [
+        {
+          role: "system",
+          content: `You are a senior DevOps engineer specializing in deployment failures. Analyze the logs and return ONLY a valid JSON object — no markdown, no extra text.
+
+Schema:
+{
+  "failure_type": "BUILD_ERROR" | "INSTALL_ERROR" | "ENV_ERROR" | "PERMISSION_ERROR" | "SYNTAX_ERROR" | "TIMEOUT_ERROR" | "MEMORY_ERROR" | "UNKNOWN_ERROR",
+  "short_reason": "3-6 word summary of what failed",
+  "detailed_reason": "Clear plain-English explanation (explain like the user is a junior dev)",
+  "probable_cause": "Exact root cause found in the logs",
+  "fix_steps": ["Step 1", "Step 2", "Step 3"],
+  "confidence": 0.95
+}`,
+        },
+        {
+          role: "user",
+          content: `Deployment source: ${source}\n\nLogs:\n${recentLogs}`,
+        },
+      ],
+      { jsonMode: true, maxTokens: 1024 }
+    );
+
+    const clean = content.replace(/^```json\s*/i, "").replace(/\s*```$/i, "").trim();
+    const parsed = JSON.parse(clean);
+
+    if (parsed.failure_type && parsed.short_reason && Array.isArray(parsed.fix_steps)) {
+      return { ...parsed, confidence: parsed.confidence ?? 0.95, ai_powered: true };
+    }
+  } catch (err: any) {
+    console.warn("[FailureAnalyzer] AI failed, using regex fallback:", err.message);
+  }
+
+  // 2. Regex fallback
+  const lowerText = logText.toLowerCase();
+  const sorted = [...FAILURE_RULES].sort((a, b) => b.confidence - a.confidence);
+
+  for (const rule of sorted) {
+    if (rule.pattern.test(lowerText)) {
       return {
         failure_type: rule.type,
         short_reason: rule.shortReason,
         detailed_reason: rule.detailedReason,
         probable_cause: rule.probableCause,
-        fix_steps: generateFixSteps(rule.type, source),
-        confidence: rule.confidence
+        fix_steps: [...(FIX_STEPS[rule.type] ?? FIX_STEPS.UNKNOWN_ERROR), ...getSourceSteps(source)],
+        confidence: rule.confidence,
+        ai_powered: false,
       };
     }
   }
 
-  // No rules matched
   return {
-    failure_type: 'UNKNOWN_ERROR',
-    short_reason: 'Unrecognized error pattern',
-    detailed_reason: 'The deployment failed with an error pattern that is not recognized by the automated analysis system.',
-    probable_cause: 'Unknown deployment issue',
-    fix_steps: generateFixSteps('UNKNOWN_ERROR', source),
-    confidence: 0.2
+    failure_type: "UNKNOWN_ERROR",
+    short_reason: "Unrecognized error pattern",
+    detailed_reason: "The failure didn't match known patterns. Check the logs manually.",
+    probable_cause: "Unknown deployment issue",
+    fix_steps: [...FIX_STEPS.UNKNOWN_ERROR, ...getSourceSteps(source)],
+    confidence: 0.2,
+    ai_powered: false,
   };
 }
 
-function generateFixSteps(failureType: string, source: string): string[] {
-  const baseSteps: Record<string, string[]> = {
-    BUILD_ERROR: [
-      'Check if all required dependencies are listed in package.json',
-      'Verify import paths are correct and case-sensitive',
-      'Run npm install or yarn install locally to test',
-      'Check for typos in module names'
-    ],
-    INSTALL_ERROR: [
-      'Clear package manager cache',
-      'Delete node_modules and package-lock.json',
-      'Run npm install or yarn install again',
-      'Check for conflicting dependency versions'
-    ],
-    ENV_ERROR: [
-      'Add missing environment variables to your deployment settings',
-      'Check variable names for typos',
-      'Ensure all required variables are defined',
-      'Verify environment variable values are correct'
-    ],
-    PERMISSION_ERROR: [
-      'Check file permissions in your project',
-      'Ensure build scripts are executable',
-      'Verify deployment has write access to required directories'
-    ],
-    PORT_ERROR: [
-      'Change the port number in your application',
-      'Use process.env.PORT for dynamic port assignment',
-      'Check for port conflicts in your configuration'
-    ],
-    SYNTAX_ERROR: [
-      'Review recent code changes for syntax errors',
-      'Run your code locally to identify issues',
-      'Check for missing brackets, quotes, or semicolons',
-      'Validate JSON configuration files'
-    ],
-    TIMEOUT_ERROR: [
-      'Check network connectivity',
-      'Optimize build process to reduce time',
-      'Increase timeout limits if possible',
-      'Review resource-intensive operations'
-    ],
-    UNKNOWN_ERROR: [
-      'Review deployment logs for specific error messages',
-      'Test the deployment locally',
-      'Check recent changes that might have caused the issue',
-      'Contact support if the problem persists'
-    ]
-  };
-
-  let steps = baseSteps[failureType] || baseSteps.UNKNOWN_ERROR;
-
-  // Source-aware modifications
-  if (source === 'github') {
-    steps = [
-      ...steps,
-      'Push fixes to your repository',
-      'Create a new commit with the changes',
-      'Trigger a new deployment from the updated branch'
-    ];
-  } else if (source === 'zip') {
-    steps = [
-      ...steps,
-      'Update your local project files',
-      'Create a new ZIP file with the fixes',
-      'Upload the corrected ZIP file for deployment'
-    ];
-  } else if (source === 'manual') {
-    steps = [
-      ...steps,
-      'Update deployment configuration in dashboard',
-      'Verify build commands and environment settings',
-      'Retry deployment with corrected settings'
-    ];
+function getSourceSteps(source: string): string[] {
+  if (source === "github") {
+    return ["Push your fix to the repository and trigger a new deployment"];
   }
-
-  return steps;
+  if (source === "zip") {
+    return ["Upload a new ZIP file with the corrected files"];
+  }
+  return [];
 }

@@ -1,56 +1,78 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { createClient } from "@/lib/supabase-browser";
 import { supabase } from "@/lib/supabase-browser";
 import { Sidebar } from "@/components/layout/sidebar";
 import { Topbar } from "@/components/layout/topbar";
 import { Toaster } from "sonner";
 import { FloatingDevOpsBot } from "@/components/ai/FloatingDevOpsBot";
+import { OnboardingFlow } from "@/components/onboarding/OnboardingFlow";
+import { useOnboarding } from "@/hooks/useOnboarding";
+import { User } from "@supabase/supabase-js";
 
-export default function DashboardLayout({
-  children,
-}: {
-  children: React.ReactNode;
-}) {
-  const [session, setSession] = useState<any>(null);
+function DashboardShell({ children }: { children: React.ReactNode }) {
+  const [user, setUser] = useState<User | null>(null);
+  const { isOnboardingComplete, loading: onboardingLoading, completeOnboarding } = useOnboarding();
 
   useEffect(() => {
-    supabase.auth.getUser().then(({ data: { user } }) => {
-      setSession(user ? { user } : null);
-    });
-
+    supabase.auth.getUser().then(({ data: { user } }) => setUser(user));
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
-      setSession(session);
+      setUser(session?.user ?? null);
     });
-
     return () => subscription.unsubscribe();
   }, []);
 
-  if (!session) {
-    return (
-      <div className="flex h-screen items-center justify-center">
-        <div className="text-center">
-          <div className="h-8 w-8 animate-spin rounded-full border-4 border-primary border-t-transparent mx-auto mb-4"></div>
-          <p className="text-muted-foreground">Loading...</p>
-        </div>
-      </div>
-    );
-  }
+  const showOnboarding = !onboardingLoading && isOnboardingComplete === false;
 
   return (
     <div className="flex h-screen bg-background">
       <Toaster richColors position="top-right" />
       <FloatingDevOpsBot />
+
+      {/* Onboarding */}
+      <OnboardingFlow open={showOnboarding} onComplete={completeOnboarding} />
+
       <Sidebar />
-      <div className="flex flex-1 flex-col lg:ml-[72px]">
-        <Topbar user={session?.user} />
-        <main className="flex-1 overflow-y-auto p-6">
-          <div className="mx-auto max-w-7xl">
+
+      {/* Main content */}
+      <div className="flex flex-1 flex-col lg:ml-[68px] min-w-0">
+        <Topbar user={user} />
+        <main className="flex-1 overflow-y-auto">
+          <div className="mx-auto max-w-7xl p-6">
             {children}
           </div>
         </main>
       </div>
     </div>
   );
+}
+
+export default function DashboardLayout({ children }: { children: React.ReactNode }) {
+  const [ready, setReady] = useState(false);
+
+  useEffect(() => {
+    // Verify session exists, redirect if not
+    supabase.auth.getUser().then(({ data: { user } }) => {
+      if (!user) {
+        window.location.href = "/auth/login";
+      } else {
+        setReady(true);
+      }
+    });
+  }, []);
+
+  if (!ready) {
+    return (
+      <div className="flex h-screen items-center justify-center bg-background">
+        <div className="flex flex-col items-center gap-4">
+          <div className="h-9 w-9 rounded-lg bg-gradient-to-br from-violet-600 to-indigo-600 flex items-center justify-center animate-pulse">
+            <span className="text-white font-bold text-sm">PX</span>
+          </div>
+          <p className="text-sm text-muted-foreground">Loading Pipeline XR...</p>
+        </div>
+      </div>
+    );
+  }
+
+  return <DashboardShell>{children}</DashboardShell>;
 }

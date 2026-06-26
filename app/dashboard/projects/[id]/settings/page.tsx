@@ -20,6 +20,8 @@ import { GradientBar } from "@/components/ui/gradient-bar";
 import { getGitHubConnectionState } from "@/lib/github-provider-guard";
 import { GitHubProviderModal } from "@/components/modals/GitHubProviderModal";
 import { Alert, AlertDescription } from "@/components/ui/alert";
+import { connectRepoToProject, disconnectRepo } from "@/app/dashboard/actions/github";
+import { GitHubRepoSelector } from "@/components/github-repo-selector";
 
 interface GitHubRepo {
   id: number;
@@ -171,6 +173,35 @@ export default function ProjectSettingsPage() {
     setCheckingGitHub(false);
   };
 
+  const handleConnectGitHub = async () => {
+    try {
+      const response = await fetch('/api/github/oauth', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+      });
+
+      const result = await response.json();
+
+      if (!result.success) {
+        if (result.error_code === 'PROVIDER_MISMATCH') {
+          setShowProviderModal(true);
+          return;
+        }
+        toast.error(result.error || 'Failed to connect GitHub');
+        return;
+      }
+
+      if (result.url) {
+        window.location.href = result.url;
+      }
+    } catch (error) {
+      console.error('GitHub connection error:', error);
+      toast.error('Failed to initiate GitHub connection');
+    }
+  };
+
   async function fetchProject() {
     setLoading(true);
     const result = await getProjectById(projectId);
@@ -222,80 +253,25 @@ export default function ProjectSettingsPage() {
     setSaving(false);
   }
 
-  const handleConnectGitHub = async () => {
-    if (!isGitHubConnected) {
-      setShowProviderModal(true);
-      return;
-    }
-
-    setConnectingGitHub(true);
-    const { data: { user } } = await supabase.auth.getUser();
-
-    if (!user) {
-      const { error } = await supabase.auth.signInWithOAuth({
-        provider: "github",
-        options: {
-          scopes: "repo read:user",
-          redirectTo: `${window.location.origin}/auth/callback?redirect=/dashboard/projects/${projectId}/settings`,
-        },
-      });
-
-      if (error) {
-        toast.error("Failed to connect GitHub");
-        setConnectingGitHub(false);
-      }
-      return;
-    }
-
-    const result = await getGitHubRepos();
-    setConnectingGitHub(false);
-
-    if (result.success && result.data) {
-      setGithubRepos(result.data);
-      setShowRepoSelector(true);
-      toast.success("GitHub connected! Select a repository");
-    } else {
-      if (result.needsReauth) {
-        const { error } = await supabase.auth.signInWithOAuth({
-          provider: "github",
-          options: {
-            scopes: "repo read:user",
-            redirectTo: `${window.location.origin}/auth/callback?redirect=/dashboard/projects/${projectId}/settings`,
-          },
-        });
-        if (error) {
-          toast.error("Failed to reconnect GitHub");
-        }
-      } else {
-        toast.error(result.error || "Failed to fetch repositories");
-      }
-    }
-  };
-
-  async function handleSelectRepo() {
-    if (!selectedRepo) {
-      toast.error("Please select a repository");
-      return;
-    }
-
-    const repo = githubRepos.find(r => r.full_name === selectedRepo);
-    if (!repo) return;
-
-    setSaving(true);
-    const result = await updateProject(projectId, {
-      github_repo_url: repo.html_url,
-    });
-
+  const handleConnectRepo = async (repoFullName: string, repoUrl: string, branch: string) => {
+    const result = await connectRepoToProject(projectId, repoFullName, repoUrl, branch);
     if (result.success) {
       toast.success("Repository connected successfully");
-      setShowRepoSelector(false);
-      setSelectedRepo("");
       fetchProject();
     } else {
       toast.error(result.error || "Failed to connect repository");
     }
-    setSaving(false);
-  }
+  };
+
+  const handleDisconnectRepo = async () => {
+    const result = await disconnectRepo(projectId);
+    if (result.success) {
+      toast.success("Repository disconnected");
+      fetchProject();
+    } else {
+      toast.error(result.error || "Failed to disconnect repository");
+    }
+  };
 
   async function handleDelete() {
     setSaving(true);
@@ -376,6 +352,22 @@ export default function ProjectSettingsPage() {
         </div>
       </div>
 
+      {/* Source Repository */}
+      <Card>
+        <CardHeader>
+          <CardTitle>Source Repository</CardTitle>
+          <CardDescription>Connect a GitHub repository to deploy from</CardDescription>
+        </CardHeader>
+        <CardContent>
+          <GitHubRepoSelector 
+            projectId={projectId}
+            currentRepo={(project as any).github_repo_full_name}
+            onConnect={handleConnectRepo}
+            onDisconnect={handleDisconnectRepo}
+          />
+        </CardContent>
+      </Card>
+
       {/* General Settings */}
       <Card>
         <CardHeader>
@@ -399,23 +391,7 @@ export default function ProjectSettingsPage() {
             </div>
           </div>
 
-          <Separator />
 
-          <div className="space-y-2">
-            <Label htmlFor="repo-url">GitHub Repository URL</Label>
-            <div className="flex gap-2">
-              <Input
-                id="repo-url"
-                value={formData.github_repo_url}
-                onChange={(e) => setFormData({ ...formData, github_repo_url: e.target.value })}
-                placeholder="https://github.com/username/repo"
-              />
-              <Button onClick={handleSaveRepoUrl} disabled={saving || formData.github_repo_url === project.github_repo_url}>
-                <Save className="h-4 w-4 mr-2" />
-                Save
-              </Button>
-            </div>
-          </div>
 
           <Separator />
 
@@ -651,73 +627,7 @@ export default function ProjectSettingsPage() {
         </CardContent>
       </Card>
 
-      {/* GitHub Integration */}
-      <Card>
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <Github className="h-5 w-5" />
-            GitHub Integration
-          </CardTitle>
-          <CardDescription>Connect your GitHub repository</CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          {!showRepoSelector ? (
-            <div className="space-y-4">
-              <p className="text-sm text-muted-foreground">
-                Connect your GitHub account to automatically fetch repository details and branches.
-              </p>
-              <div className="flex gap-2">
-                <Button onClick={handleConnectGitHub} disabled={connectingGitHub}>
-                  <Github className="h-4 w-4 mr-2" />
-                  {connectingGitHub ? "Connecting..." : "Connect GitHub"}
-                </Button>
-                <Button variant="outline" onClick={handleConnectGitHub} disabled={connectingGitHub}>
-                  <RefreshCw className="h-4 w-4 mr-2" />
-                  Change Repository
-                </Button>
-              </div>
-            </div>
-          ) : (
-            <div className="space-y-4">
-              <div className="space-y-2">
-                <Label>Select Repository</Label>
-                <Select value={selectedRepo} onValueChange={setSelectedRepo}>
-                  <SelectTrigger>
-                    <SelectValue placeholder="Choose a repository" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {githubRepos.map((repo) => (
-                      <SelectItem key={repo.id} value={repo.full_name}>
-                        {repo.full_name}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-              {selectedRepo && (
-                <div className="p-4 border rounded-lg space-y-2">
-                  <p className="text-sm font-medium">Selected Repository</p>
-                  <p className="text-sm text-muted-foreground">
-                    {githubRepos.find(r => r.full_name === selectedRepo)?.html_url}
-                  </p>
-                  <p className="text-xs text-muted-foreground">
-                    Default branch: {githubRepos.find(r => r.full_name === selectedRepo)?.default_branch}
-                  </p>
-                </div>
-              )}
-              <div className="flex gap-2">
-                <Button onClick={handleSelectRepo} disabled={!selectedRepo || saving}>
-                  <Save className="h-4 w-4 mr-2" />
-                  {saving ? "Connecting..." : "Connect Repository"}
-                </Button>
-                <Button variant="outline" onClick={() => { setShowRepoSelector(false); setSelectedRepo(""); }}>
-                  Cancel
-                </Button>
-              </div>
-            </div>
-          )}
-        </CardContent>
-      </Card>
+
 
       {/* Danger Zone */}
       <Card className="border-destructive">

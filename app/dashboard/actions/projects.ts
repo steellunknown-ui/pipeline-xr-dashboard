@@ -145,6 +145,18 @@ export async function deleteProject(id: string) {
       return { success: false, error: "Unauthorized" };
     }
 
+    // Log BEFORE deleting — after delete the project_id FK no longer exists
+    // and the activity_log insert would fail silently
+    try {
+      await createActivityLog({
+        event: "project_deleted",
+        user_id: user.id,
+        metadata: { project_id: id },
+      });
+    } catch {
+      // Non-critical — don't block deletion if logging fails
+    }
+
     const { error } = await supabase
       .from("projects")
       .delete()
@@ -154,13 +166,6 @@ export async function deleteProject(id: string) {
     if (error) {
       return { success: false, error: error.message };
     }
-
-    await createActivityLog({
-      event: "project_deleted",
-      user_id: user.id,
-      project_id: id,
-      metadata: { project_id: id },
-    });
 
     return { success: true };
   } catch (error) {

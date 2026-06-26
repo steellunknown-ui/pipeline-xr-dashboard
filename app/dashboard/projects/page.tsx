@@ -31,6 +31,8 @@ export default function ProjectsPage() {
   const [showProviderModal, setShowProviderModal] = useState(false);
   const [isGitHubConnected, setIsGitHubConnected] = useState(false);
   const [checkingGitHub, setCheckingGitHub] = useState(true);
+  const [projectToDelete, setProjectToDelete] = useState<Project | null>(null);
+  const [deleting, setDeleting] = useState(false);
 
 
   useEffect(() => {
@@ -75,14 +77,16 @@ export default function ProjectsPage() {
   }
 
   async function handleDelete(id: string) {
-    if (!confirm("Are you sure you want to delete this project?")) return;
+    setDeleting(true);
     const result = await deleteProject(id);
     if (result.success) {
       toast.success("Project deleted");
+      setProjectToDelete(null);
       fetchProjects();
     } else {
       toast.error(result.error || "Failed to delete project");
     }
+    setDeleting(false);
   }
 
   async function handleMakeDeployment(projectId: string) {
@@ -137,6 +141,43 @@ export default function ProjectsPage() {
         open={showProviderModal}
         onOpenChange={setShowProviderModal}
       />
+
+      {/* ── Delete Confirmation Dialog ─────────────────────── */}
+      <Dialog open={!!projectToDelete} onOpenChange={(o) => !o && setProjectToDelete(null)}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <div className="w-9 h-9 rounded-full bg-red-100 dark:bg-red-950 flex items-center justify-center">
+                <Trash2 className="w-4 h-4 text-red-600 dark:text-red-400" />
+              </div>
+              Delete Project
+            </DialogTitle>
+            <DialogDescription className="pt-1">
+              Are you sure you want to delete{" "}
+              <span className="font-semibold text-foreground">{projectToDelete?.name}</span>?<br />
+              This will permanently remove the project and all its deployments. This action cannot be undone.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter className="gap-2 sm:gap-0">
+            <Button
+              variant="outline"
+              onClick={() => setProjectToDelete(null)}
+              disabled={deleting}
+            >
+              Cancel
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={() => projectToDelete && handleDelete(projectToDelete.id)}
+              disabled={deleting}
+              className="gap-2"
+            >
+              {deleting && <span className="w-3.5 h-3.5 border-2 border-white/40 border-t-white rounded-full animate-spin" />}
+              {deleting ? "Deleting..." : "Yes, delete"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
       <GradientBar />
       <div className="flex items-center justify-between">
         <div>
@@ -259,7 +300,7 @@ export default function ProjectsPage() {
                     <Button
                       variant="ghost"
                       size="icon"
-                      onClick={() => handleDelete(project.id)}
+                      onClick={() => setProjectToDelete(project)}
                     >
                       <Trash2 className="h-4 w-4 text-destructive" />
                     </Button>

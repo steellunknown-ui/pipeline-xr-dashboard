@@ -1,4 +1,4 @@
-import { QwenAI } from "./qwen-ai";
+import { chatAI } from "./ai-client";
 
 export interface ReplayExplanationInput {
   deploymentId: string;
@@ -23,26 +23,22 @@ export async function explainReplayEvent(
   input: ReplayExplanationInput
 ): Promise<ReplayExplanationResult | null> {
   try {
-    const ai = new QwenAI();
+    const content = await chatAI([
+      {
+        role: "system",
+        content: "You are a senior DevOps engineer explaining a specific deployment moment. Explain only what is known. Do not assume. Do not generalize.",
+      },
+      { role: "user", content: buildUserPrompt(input) },
+    ], { maxTokens: 512 });
 
-    const systemPrompt = "You are a senior DevOps engineer explaining a specific deployment moment. Explain only what is known. Do not assume. Do not generalize.";
-
-    const userPrompt = buildUserPrompt(input);
-
-    const response = await ai.chat([
-      { role: "system", content: systemPrompt },
-      { role: "user", content: userPrompt },
-    ]);
-
-    const content = response.choices?.[0]?.message?.content;
     if (!content) return null;
-
     return parseAIResponse(content);
   } catch (error) {
     console.error("[replay-explanation] AI error:", error);
     return null;
   }
 }
+
 
 function buildUserPrompt(input: ReplayExplanationInput): string {
   let prompt = `Event: ${input.eventType}\nTimestamp: ${input.timestamp}\n`;

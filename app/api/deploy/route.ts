@@ -31,22 +31,23 @@ export async function POST(req: NextRequest) {
 
     const vercelId = deployment.vercel_deployment_id;
     // --- 1. Fetch deployment events (logs) from Vercel ---
-    let logsUrl = `https://api.vercel.com/v2/deployments/${vercelId}/events`;
-    if (teamId) logsUrl += `?teamId=${teamId}`;
-
-    // Get the latest log timestamp from our DB to avoid duplicates
-    const { data: latestLog } = await supabase
+    // Get the recent logs from our DB to avoid duplicates
+    const { data: recentLogs } = await supabase
       .from("deployment_logs")
-      .select("created_at")
+      .select("message, created_at")
       .eq("deployment_id", deploymentId)
       .order("created_at", { ascending: false })
-      .limit(1)
-      .single();
+      .limit(200);
 
-    const since = latestLog ? new Date(latestLog.created_at).getTime() : 0;
-    if (since > 0) {
-      logsUrl += (teamId ? "&" : "?") + `since=${since}`;
-    }
+    const existingMessages = new Set(recentLogs?.map(l => l.message) || []);
+    const latestLog = recentLogs?.[0];
+
+    // Overlap by 10 seconds to ensure no logs are missed
+    const since = latestLog ? Math.max(0, new Date(latestLog.created_at).getTime() - 10000) : 0;
+    
+    let logsUrl = `https://api.vercel.com/v2/deployments/${vercelId}/events?direction=forward`;
+    if (since > 0) logsUrl += `&since=${since}`;
+    if (teamId) logsUrl += `&teamId=${teamId}`;
 
     const logsRes = await fetch(logsUrl, {
       headers: { Authorization: `Bearer ${vercelToken}` },
@@ -56,13 +57,13 @@ export async function POST(req: NextRequest) {
       const logsData = await logsRes.json();
       if (Array.isArray(logsData)) {
         const newLogs = logsData
-          .filter(event => event.payload?.text)
+          .filter(event => event.payload?.text && !existingMessages.has(event.payload.text))
           .map(event => ({
             deployment_id: deploymentId,
             user_id: deployment.user_id,
             message: event.payload.text,
             level: event.type === "error" ? "error" : "info",
-            created_at: new Date(event.created).toISOString()
+            created_at: new Date(event.created || event.date).toISOString()
           }));
 
         if (newLogs.length > 0) {

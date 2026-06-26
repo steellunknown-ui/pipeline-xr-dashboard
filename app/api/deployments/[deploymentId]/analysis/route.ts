@@ -83,8 +83,8 @@ export async function GET(
     // Ensure deployment has a valid source
     const deploymentSource = deployment.source || inferSourceFromDeployment(deployment);
 
-    // Perform rule-based analysis
-    const analysis: DeploymentAnalysis = analyzeFailure(analysisLogs, deploymentSource);
+    // Perform AI analysis with rule-based fallback
+    const analysis: DeploymentAnalysis = await analyzeFailure(analysisLogs, deploymentSource);
 
     // STEP 6.3.2: Add decision intelligence
     const decisionOptions: DecisionOption[] = await analyzeDeploymentDecisions(deployment, analysis);
@@ -117,8 +117,8 @@ export async function GET(
       recentDeployments || []
     );
 
-    // Determine if AI was used (for this implementation, always false since we use rules)
-    const aiUsed = analysis.confidence < 0.7;
+    // Determine if AI was used (confidence >= 0.9 in our system implies AI was used successfully)
+    const aiUsed = analysis.confidence >= 0.9;
 
     // If confidence is low and we have AI available, could enhance with AI here
     // For now, we'll stick with rule-based analysis

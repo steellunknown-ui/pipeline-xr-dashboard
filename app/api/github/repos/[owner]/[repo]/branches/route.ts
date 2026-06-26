@@ -1,11 +1,15 @@
 import { NextResponse } from "next/server";
 import { getSupabaseServer } from "@/lib/supabase-server";
 
-export async function GET() {
+export async function GET(
+  request: Request,
+  { params }: { params: Promise<{ owner: string; repo: string }> }
+) {
   try {
+    const resolvedParams = await params;
+    const { owner, repo } = resolvedParams;
     const supabase = await getSupabaseServer();
     
-    // Get the session to find the provider_token
     const { data: { session }, error: sessionError } = await supabase.auth.getSession();
     
     if (sessionError || !session) {
@@ -15,7 +19,6 @@ export async function GET() {
       );
     }
     
-    // CRITICAL: If provider_token is null, return exact error message for UI handling
     if (!session.provider_token) {
       return NextResponse.json(
         { error: "GitHub session expired. Please sign out and sign in again with GitHub to restore repo access." },
@@ -25,16 +28,15 @@ export async function GET() {
     
     const provider_token = session.provider_token;
     
-    const response = await fetch("https://api.github.com/user/repos?sort=updated&per_page=100&type=all", {
+    const response = await fetch(`https://api.github.com/repos/${owner}/${repo}/branches`, {
       headers: {
         Authorization: `token ${provider_token}`,
         Accept: "application/vnd.github.v3+json",
       },
-      next: { revalidate: 0 }, // Do not cache
+      next: { revalidate: 0 },
     });
 
     if (!response.ok) {
-      // If GitHub API returns an auth error, we can also throw the session expired error
       if (response.status === 401 || response.status === 403) {
         return NextResponse.json(
           { error: "GitHub session expired. Please sign out and sign in again with GitHub to restore repo access." },
@@ -47,24 +49,17 @@ export async function GET() {
       );
     }
 
-    const repos = await response.json();
+    const branches = await response.json();
     
-    // Map to required fields to reduce payload size
-    const mappedRepos = repos.map((repo: any) => ({
-      id: repo.id,
-      name: repo.name,
-      full_name: repo.full_name,
-      description: repo.description,
-      private: repo.private,
-      default_branch: repo.default_branch,
-      html_url: repo.html_url,
-      updated_at: repo.updated_at,
-      language: repo.language
+    const mappedBranches = branches.map((branch: any) => ({
+      name: branch.name,
+      sha: branch.commit.sha,
+      protected: branch.protected
     }));
     
-    return NextResponse.json(mappedRepos);
+    return NextResponse.json(mappedBranches);
   } catch (error) {
-    console.error("Error fetching GitHub repos:", error);
+    console.error("Error fetching GitHub branches:", error);
     return NextResponse.json(
       { error: "Internal Server Error" },
       { status: 500 }

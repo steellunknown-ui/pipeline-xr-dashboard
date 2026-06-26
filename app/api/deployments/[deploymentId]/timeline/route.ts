@@ -27,6 +27,15 @@ export async function GET(
     const { deploymentId } = await params;
     const supabase = await createClient();
 
+    // Ensure user is authenticated for RLS to work properly
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) {
+      return NextResponse.json({
+        success: false,
+        error: "Unauthorized"
+      }, { status: 401 });
+    }
+
     // Get deployment data
     const { data: deployment, error } = await supabase
       .from("deployments")

@@ -3,140 +3,175 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { cn } from "@/lib/utils";
-import { 
-  LayoutDashboard, 
-  Rocket, 
-  FileText, 
-  Settings,
-  Menu,
-  X,
+import {
+  LayoutDashboard,
+  Rocket,
   FolderKanban,
   Key,
-  Bot,
   Activity,
-  Home
+  Settings,
+  LogOut,
+  ChevronRight,
 } from "lucide-react";
 import { useState } from "react";
+import { supabase } from "@/lib/supabase-browser";
+import { useRouter } from "next/navigation";
+import { toast } from "sonner";
 
 const navigation = [
-  { name: "← Back to Homepage", href: "/", icon: Home, special: true },
-  { name: "Overview", href: "/dashboard", icon: LayoutDashboard },
+  { name: "Overview", href: "/dashboard", icon: LayoutDashboard, exact: true },
   { name: "Projects", href: "/dashboard/projects", icon: FolderKanban },
   { name: "Deployments", href: "/dashboard/deployments", icon: Rocket },
   { name: "Environment", href: "/dashboard/environment", icon: Key },
-  { name: "AI Assistant", href: "/dashboard/ai", icon: Bot },
   { name: "Activity", href: "/dashboard/activity", icon: Activity },
-  { name: "Logs", href: "/dashboard/logs", icon: FileText },
   { name: "Settings", href: "/dashboard/settings", icon: Settings },
 ];
 
+function isActive(pathname: string, href: string, exact?: boolean) {
+  if (exact) return pathname === href;
+  return pathname === href || pathname.startsWith(href + "/");
+}
+
 export function Sidebar() {
   const pathname = usePathname();
-  const [isOpen, setIsOpen] = useState(false);
-  const [isExpanded, setIsExpanded] = useState(false);
+  const router = useRouter();
+  const [mobileOpen, setMobileOpen] = useState(false);
+  const [expanded, setExpanded] = useState(false);
+
+  const handleSignOut = async () => {
+    await supabase.auth.signOut();
+    toast.success("Signed out");
+    router.push("/");
+  };
+
+  const NavLinks = ({ onClick }: { onClick?: () => void }) => (
+    <nav className="flex-1 px-3 py-4 space-y-0.5">
+      {navigation.map((item) => {
+        const active = isActive(pathname, item.href, item.exact);
+        return (
+          <Link
+            key={item.name}
+            href={item.href}
+            onClick={onClick}
+            className={cn(
+              "group flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-all duration-150",
+              active
+                ? "bg-primary text-primary-foreground shadow-sm"
+                : "text-muted-foreground hover:text-foreground hover:bg-muted/70"
+            )}
+          >
+            <item.icon className={cn("h-4 w-4 flex-shrink-0", active ? "text-primary-foreground" : "text-muted-foreground group-hover:text-foreground")} />
+            <span className="truncate">{item.name}</span>
+            {active && <ChevronRight className="ml-auto h-3.5 w-3.5 opacity-60" />}
+          </Link>
+        );
+      })}
+    </nav>
+  );
 
   return (
     <>
-      {/* Mobile menu button */}
+      {/* Mobile toggle */}
       <button
-        onClick={() => setIsOpen(!isOpen)}
-        className="fixed top-4 left-4 z-50 p-2 rounded-md bg-background border border-border lg:hidden"
+        onClick={() => setMobileOpen(!mobileOpen)}
+        className="fixed top-4 left-4 z-50 p-2 rounded-lg bg-background border border-border shadow-sm lg:hidden"
+        aria-label="Toggle menu"
       >
-        {isOpen ? <X className="h-5 w-5" /> : <Menu className="h-5 w-5" />}
+        <div className="w-4 h-0.5 bg-foreground mb-1 transition-all" style={{ transform: mobileOpen ? "rotate(45deg) translate(2px, 2px)" : "none" }} />
+        <div className="w-4 h-0.5 bg-foreground mb-1 transition-all" style={{ opacity: mobileOpen ? 0 : 1 }} />
+        <div className="w-4 h-0.5 bg-foreground transition-all" style={{ transform: mobileOpen ? "rotate(-45deg) translate(2px, -2px)" : "none" }} />
       </button>
 
       {/* Mobile overlay */}
-      {isOpen && (
+      {mobileOpen && (
         <div
-          className="fixed inset-0 z-40 bg-black/50 lg:hidden"
-          onClick={() => setIsOpen(false)}
+          className="fixed inset-0 z-40 bg-black/50 backdrop-blur-sm lg:hidden"
+          onClick={() => setMobileOpen(false)}
         />
       )}
 
-      {/* Sidebar - Mobile (full width) */}
+      {/* Mobile sidebar */}
       <div
         className={cn(
-          "fixed left-0 top-0 z-40 h-full w-64 transform bg-background border-r border-border transition-transform duration-200 ease-in-out lg:hidden",
-          isOpen ? "translate-x-0" : "-translate-x-full"
+          "fixed left-0 top-0 z-40 h-full w-64 bg-background border-r border-border flex flex-col transition-transform duration-300 lg:hidden",
+          mobileOpen ? "translate-x-0" : "-translate-x-full"
         )}
       >
-        <div className="flex h-full flex-col">
-          <div className="flex h-16 items-center px-6 border-b border-border">
-            <h1 className="text-xl font-semibold">Pipeline XR</h1>
+        {/* Logo */}
+        <div className="flex h-16 items-center gap-3 px-5 border-b border-border">
+          <div className="h-8 w-8 rounded-md border-2 border-foreground flex items-center justify-center flex-shrink-0">
+            <span className="text-foreground font-black text-xs tracking-tighter">XR</span>
           </div>
-          <nav className="flex-1 space-y-1 px-3 py-4">
-            {navigation.map((item) => {
-              const isActive = pathname === item.href;
-              return (
-                <Link
-                  key={item.name}
-                  href={item.href}
-                  onClick={() => setIsOpen(false)}
-                  className={cn(
-                    "flex items-center px-3 py-2 text-sm font-medium rounded-md transition-colors",
-                    item.special
-                      ? "text-primary hover:bg-primary/10 border border-primary/20"
-                      : isActive
-                      ? "bg-primary text-primary-foreground"
-                      : "text-muted-foreground hover:text-foreground hover:bg-muted"
-                  )}
-                >
-                  <item.icon className="mr-3 h-5 w-5" />
-                  {item.name}
-                </Link>
-              );
-            })}
-          </nav>
+          <span className="text-base font-bold tracking-tight">Pipeline XR</span>
+        </div>
+
+        <NavLinks onClick={() => setMobileOpen(false)} />
+
+        {/* Sign out */}
+        <div className="p-3 border-t border-border">
+          <button
+            onClick={handleSignOut}
+            className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium text-muted-foreground hover:text-red-500 hover:bg-red-500/10 transition-all"
+          >
+            <LogOut className="h-4 w-4" />
+            Sign Out
+          </button>
         </div>
       </div>
 
-      {/* Sidebar - Desktop (hover expand) */}
+      {/* Desktop sidebar — hover to expand */}
       <div
-        onMouseEnter={() => setIsExpanded(true)}
-        onMouseLeave={() => setIsExpanded(false)}
+        onMouseEnter={() => setExpanded(true)}
+        onMouseLeave={() => setExpanded(false)}
         className={cn(
-          "hidden lg:block fixed left-0 top-0 h-screen bg-background border-r border-border transition-all duration-300 ease-in-out overflow-hidden",
-          isExpanded ? "w-[260px]" : "w-[72px]"
+          "hidden lg:flex fixed left-0 top-0 h-screen flex-col bg-background border-r border-border transition-all duration-300 ease-in-out overflow-hidden z-30",
+          expanded ? "w-[230px]" : "w-[68px]"
         )}
       >
-        <div className="flex h-full flex-col">
-          {/* Logo */}
-          <div className="flex h-16 items-center border-b border-border px-4">
-            <div className="flex items-center gap-3">
-              <div className="h-8 w-8 rounded-md bg-primary flex items-center justify-center flex-shrink-0">
-                <span className="text-primary-foreground font-bold text-sm">PX</span>
-              </div>
-              {isExpanded && (
-                <h1 className="text-lg font-semibold whitespace-nowrap">Pipeline XR</h1>
-              )}
-            </div>
+        {/* Logo */}
+        <div className="flex h-16 items-center border-b border-border px-[18px] flex-shrink-0">
+          <div className="h-8 w-8 rounded-md border-2 border-foreground flex items-center justify-center flex-shrink-0">
+            <span className="text-foreground font-black text-xs tracking-tighter">XR</span>
           </div>
+          {expanded && (
+            <span className="ml-3 text-base font-bold tracking-tight whitespace-nowrap">Pipeline XR</span>
+          )}
+        </div>
 
-          {/* Navigation */}
-          <nav className="flex-1 space-y-1 px-2 py-4">
-            {navigation.map((item) => {
-              const isActive = pathname === item.href;
-              return (
-                <Link
-                  key={item.name}
-                  href={item.href}
-                  className={cn(
-                    "flex items-center px-3 py-2.5 text-sm font-medium rounded-md transition-colors",
-                    item.special
-                      ? "text-primary hover:bg-primary/10 border border-primary/20"
-                      : isActive
-                      ? "bg-primary text-primary-foreground"
-                      : "text-muted-foreground hover:text-foreground hover:bg-muted"
-                  )}
-                >
-                  <item.icon className="h-5 w-5 flex-shrink-0" />
-                  {isExpanded && (
-                    <span className="ml-3 whitespace-nowrap">{item.name}</span>
-                  )}
-                </Link>
-              );
-            })}
-          </nav>
+        {/* Nav */}
+        <nav className="flex-1 px-2.5 py-4 space-y-0.5">
+          {navigation.map((item) => {
+            const active = isActive(pathname, item.href, item.exact);
+            return (
+              <Link
+                key={item.name}
+                href={item.href}
+                title={!expanded ? item.name : undefined}
+                className={cn(
+                  "group flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-all duration-150",
+                  active
+                    ? "bg-primary text-primary-foreground shadow-sm"
+                    : "text-muted-foreground hover:text-foreground hover:bg-muted/70"
+                )}
+              >
+                <item.icon className={cn("h-4 w-4 flex-shrink-0", active ? "text-primary-foreground" : "")} />
+                {expanded && <span className="whitespace-nowrap">{item.name}</span>}
+                {expanded && active && <ChevronRight className="ml-auto h-3.5 w-3.5 opacity-60" />}
+              </Link>
+            );
+          })}
+        </nav>
+
+        {/* Sign out at bottom */}
+        <div className="p-2.5 border-t border-border flex-shrink-0">
+          <button
+            onClick={handleSignOut}
+            title={!expanded ? "Sign Out" : undefined}
+            className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium text-muted-foreground hover:text-red-500 hover:bg-red-500/10 transition-all"
+          >
+            <LogOut className="h-4 w-4 flex-shrink-0" />
+            {expanded && <span className="whitespace-nowrap">Sign Out</span>}
+          </button>
         </div>
       </div>
     </>

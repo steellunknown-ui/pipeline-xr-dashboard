@@ -95,6 +95,50 @@ export default function DeploymentLogsPage() {
     return () => clearInterval(interval);
   }, [deployment?.vercel_deployment_id, deployment?.status, deploymentId]);
 
+  // Real-time Vercel Logs (SSE)
+  useEffect(() => {
+    if (!deployment || !deployment.vercel_deployment_id) return;
+    if (deployment.status !== "building" && deployment.status !== "pending") return;
+
+    const eventSource = new EventSource(`/api/deployments/${deploymentId}/logs`);
+    
+    eventSource.onmessage = (event) => {
+      try {
+        const data = JSON.parse(event.data);
+        if (data.type === "stdout" || data.type === "stderr") {
+          const logText = data.payload.text;
+          const newLog: DeploymentLog = {
+            id: `vercel-${Date.now()}-${Math.random()}`,
+            deployment_id: deploymentId,
+            user_id: deployment.user_id,
+            message: logText,
+            level: data.type === "stderr" ? "error" : "info",
+            created_at: new Date(data.payload.date || Date.now()).toISOString()
+          };
+          setLogs((prev) => [...prev, newLog]);
+        } else if (data.type === "command") {
+          const newLog: DeploymentLog = {
+            id: `vercel-${Date.now()}-${Math.random()}`,
+            deployment_id: deploymentId,
+            user_id: deployment.user_id,
+            message: `> ${data.payload.text}`,
+            level: "info",
+            created_at: new Date(data.payload.date || Date.now()).toISOString()
+          };
+          setLogs((prev) => [...prev, newLog]);
+        }
+      } catch (err) {}
+    };
+
+    eventSource.onerror = () => {
+      eventSource.close();
+    };
+
+    return () => {
+      eventSource.close();
+    };
+  }, [deployment?.vercel_deployment_id, deployment?.status, deploymentId, deployment?.user_id]);
+
   useEffect(() => {
     logsEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [logs]);
@@ -171,11 +215,23 @@ export default function DeploymentLogsPage() {
 
   const getLevelColor = (level: string) => {
     switch (level) {
-      case "success": return "text-green-500";
-      case "error": return "text-red-500";
-      case "warning": return "text-yellow-500";
-      default: return "text-muted-foreground";
+      case "success": return "text-green-400";
+      case "error": return "text-red-400";
+      case "warning": return "text-yellow-400";
+      default: return "text-zinc-300";
     }
+  };
+
+  const formatLogMessage = (message: string) => {
+    // Basic syntax highlighting for terminal logs
+    let formatted = message
+      .replace(/(ERROR|Failed|ERR!|error:)/gi, '<span class="text-red-400 font-semibold">$1</span>')
+      .replace(/(WARN|Warning|warn:)/gi, '<span class="text-yellow-400 font-semibold">$1</span>')
+      .replace(/(success|Done|compiled successfully)/gi, '<span class="text-green-400 font-semibold">$1</span>')
+      .replace(/(npm|yarn|pnpm|npx) (run|install|build|dev)/gi, '<span class="text-blue-400">$1 $2</span>')
+      .replace(/(\[.*?\])/g, '<span class="text-zinc-500">$1</span>');
+      
+    return <span dangerouslySetInnerHTML={{ __html: formatted }} />;
   };
 
   const getStatusBadge = (status: string) => {
@@ -300,34 +356,56 @@ export default function DeploymentLogsPage() {
       )}
 
       {/* 3. Logs */}
-      <Card className="p-6">
-        <div className="flex items-center gap-2 mb-4">
-          <Terminal className="h-4 w-4" />
-          <h3 className="font-semibold">Build Output</h3>
+      <Card className="overflow-hidden border-zinc-800 bg-black/90 shadow-2xl backdrop-blur-xl relative group">
+        <div className="absolute inset-0 bg-gradient-to-b from-white/5 to-transparent opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none" />
+        
+        {/* Terminal Header */}
+        <div className="flex items-center justify-between px-4 py-3 bg-zinc-900/80 border-b border-zinc-800">
+          <div className="flex items-center gap-2">
+            <div className="flex gap-1.5 mr-4">
+              <div className="w-3 h-3 rounded-full bg-red-500/80 border border-red-500/20" />
+              <div className="w-3 h-3 rounded-full bg-yellow-500/80 border border-yellow-500/20" />
+              <div className="w-3 h-3 rounded-full bg-green-500/80 border border-green-500/20" />
+            </div>
+            <Terminal className="h-4 w-4 text-zinc-400" />
+            <span className="text-xs font-medium text-zinc-400 tracking-wider uppercase">Build Terminal</span>
+          </div>
+          <Badge variant="outline" className="bg-zinc-800 border-zinc-700 text-zinc-300 text-[10px]">
+            bash
+          </Badge>
         </div>
 
-        <div className="bg-black rounded-lg p-4 font-mono text-sm max-h-[600px] overflow-y-auto">
+        {/* Terminal Body */}
+        <div className="p-4 font-mono text-sm max-h-[600px] overflow-y-auto custom-scrollbar bg-black/40">
           {loading && logs.length === 0 ? (
-            <div className="space-y-2">
+            <div className="space-y-2 animate-pulse">
               {Array.from({ length: 5 }).map((_, i) => (
-                <Skeleton key={i} className="h-4 w-full bg-gray-800" />
+                <div key={i} className="h-4 w-full bg-zinc-800/50 rounded flex gap-4">
+                  <div className="w-16 h-full bg-zinc-800 rounded" />
+                  <div className="flex-1 h-full bg-zinc-800 rounded opacity-50" />
+                </div>
               ))}
             </div>
           ) : logs.length === 0 ? (
-            <p className="text-gray-500">No logs yet. Click Run to start deployment.</p>
+            <div className="flex flex-col items-center justify-center h-32 text-zinc-600">
+              <Terminal className="h-8 w-8 mb-2 opacity-50" />
+              <p>Waiting for build output...</p>
+            </div>
           ) : (
-            logs.map((log) => (
-              <div key={log.id} className="flex gap-3 py-1">
-                <span className="text-gray-500 text-xs">
-                  {new Date(log.created_at).toLocaleTimeString()}
-                </span>
-                <span className={cn("flex-1", getLevelColor(log.level))}>
-                  {log.message}
-                </span>
-              </div>
-            ))
+            <div className="space-y-1">
+              {logs.map((log) => (
+                <div key={log.id} className="flex gap-4 hover:bg-white/5 px-2 py-0.5 -mx-2 rounded transition-colors group/line">
+                  <span className="text-zinc-600 text-[11px] mt-0.5 select-none w-16 flex-shrink-0">
+                    {new Date(log.created_at).toLocaleTimeString([], { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' })}
+                  </span>
+                  <div className={cn("flex-1 break-all", getLevelColor(log.level))}>
+                    {formatLogMessage(log.message)}
+                  </div>
+                </div>
+              ))}
+            </div>
           )}
-          <div ref={logsEndRef} />
+          <div ref={logsEndRef} className="h-4" />
         </div>
       </Card>
 

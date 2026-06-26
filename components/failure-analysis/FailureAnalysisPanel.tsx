@@ -98,21 +98,24 @@ export function FailureAnalysisPanel({ deploymentId, onExplain }: FailureAnalysi
 
   if (loading) {
     return (
-      <Card>
+      <Card className="relative overflow-hidden border-rose-200/50 bg-gradient-to-br from-rose-50/80 to-pink-50/50 backdrop-blur-xl shadow-lg">
+        <div className="absolute inset-0 bg-gradient-to-r from-transparent via-rose-200/20 to-transparent -translate-x-[100%] animate-[shimmer_2s_infinite]" />
         <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <AlertTriangle className="h-5 w-5" />
-            Failure Analysis
+          <CardTitle className="flex items-center gap-2 text-rose-800">
+            <div className="h-8 w-8 rounded-lg bg-gradient-to-br from-rose-400 to-pink-500 flex items-center justify-center shadow-inner">
+              <AlertTriangle className="h-4 w-4 text-white animate-pulse" />
+            </div>
+            Analyzing Failure...
           </CardTitle>
         </CardHeader>
-        <CardContent className="space-y-4">
-          <Skeleton className="h-6 w-48" />
-          <Skeleton className="h-4 w-full" />
-          <Skeleton className="h-4 w-3/4" />
-          <div className="space-y-2">
-            <Skeleton className="h-4 w-full" />
-            <Skeleton className="h-4 w-full" />
-            <Skeleton className="h-4 w-2/3" />
+        <CardContent className="space-y-4 relative z-10">
+          <Skeleton className="h-6 w-48 bg-rose-200/50" />
+          <Skeleton className="h-4 w-full bg-rose-200/50" />
+          <Skeleton className="h-4 w-3/4 bg-rose-200/50" />
+          <div className="space-y-2 pt-2 border-t border-rose-200/30">
+            <Skeleton className="h-4 w-full bg-rose-200/50" />
+            <Skeleton className="h-4 w-full bg-rose-200/50" />
+            <Skeleton className="h-4 w-2/3 bg-rose-200/50" />
           </div>
         </CardContent>
       </Card>
@@ -141,17 +144,30 @@ export function FailureAnalysisPanel({ deploymentId, onExplain }: FailureAnalysi
   if (!analysis) return null;
 
   return (
-    <Card>
-      <CardHeader>
-        <CardTitle className="flex items-center gap-2">
-          <AlertTriangle className="h-5 w-5 text-red-500" />
-          Failure Analysis
-        </CardTitle>
-        <CardDescription>
-          Automated analysis of deployment failure
-        </CardDescription>
+    <Card className="relative overflow-hidden border-rose-200/60 bg-gradient-to-br from-white to-rose-50/30 dark:from-zinc-950 dark:to-zinc-900 shadow-xl backdrop-blur-xl transition-all duration-500 hover:shadow-2xl hover:border-rose-300/50">
+      <div className="absolute top-0 right-0 p-32 bg-rose-500/5 dark:bg-rose-500/10 rounded-full blur-3xl pointer-events-none" />
+      <CardHeader className="relative z-10 pb-4">
+        <div className="flex justify-between items-start">
+            <div>
+                <CardTitle className="flex items-center gap-3 text-xl">
+                    <div className="h-10 w-10 rounded-xl bg-gradient-to-br from-rose-500 to-pink-600 flex items-center justify-center shadow-lg shadow-rose-500/20">
+                        <AlertTriangle className="h-5 w-5 text-white" />
+                    </div>
+                    Failure Analysis
+                </CardTitle>
+                <CardDescription className="mt-2 text-base">
+                Automated root cause analysis of this deployment
+                </CardDescription>
+            </div>
+            {analysis.ai_used && (
+                <Badge variant="outline" className="bg-gradient-to-r from-rose-100 to-pink-100 text-rose-800 border-rose-200/50 shadow-sm animate-pulse flex items-center gap-1.5 px-3 py-1">
+                    <Brain className="h-3.5 w-3.5" />
+                    AI Enhanced
+                </Badge>
+            )}
+        </div>
       </CardHeader>
-      <CardContent className="space-y-6">
+      <CardContent className="space-y-6 relative z-10">
         {/* Deployment Info */}
         <div className="flex items-center gap-4 text-sm">
           <div className="flex items-center gap-2">
@@ -225,13 +241,8 @@ export function FailureAnalysisPanel({ deploymentId, onExplain }: FailureAnalysi
         </div>
 
         {/* Analysis Info */}
-        <div className="pt-4 border-t text-xs text-muted-foreground flex items-center justify-between">
-          <span>Analyzed {analysis.logs_analyzed} log entries</span>
-          {analysis.ai_used && (
-            <Badge variant="outline" className="text-xs">
-              AI Enhanced
-            </Badge>
-          )}
+        <div className="pt-4 border-t border-border/50 text-xs text-muted-foreground flex items-center justify-between">
+          <span>Deep scanned {analysis.logs_analyzed} log entries</span>
         </div>
       </CardContent>
     </Card>

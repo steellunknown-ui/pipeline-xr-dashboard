@@ -108,16 +108,17 @@ export async function POST(
         }
 
         // Spawn runner as detached child process
-        // Use path.resolve to avoid webpack analyzing the string as a static import
-        const runnerPath = path.resolve("runner/dist/index.js");
+        const runnerPath = path.join(process.cwd(), "runner", "dist", "index.js");
 
         try {
-            const child = spawn("node", [runnerPath, deploymentId], {
-                detached: true,
-                stdio: "ignore",
-                cwd: process.cwd(),
-                env: process.env as NodeJS.ProcessEnv,
-            });
+            // Bypass Turbopack static analysis by completely obscuring the spawn invocation
+            const cp = require('child_process');
+            const spawnDetached = new Function(
+                "cp", "runner", "depId", "cwd", "env",
+                "return cp.spawn('node', [runner, depId], { detached: true, stdio: 'ignore', cwd: cwd, env: env })"
+            );
+            
+            const child = spawnDetached(cp, runnerPath, deploymentId, process.cwd(), process.env);
 
             child.unref(); // Allow API to exit without waiting for runner
 

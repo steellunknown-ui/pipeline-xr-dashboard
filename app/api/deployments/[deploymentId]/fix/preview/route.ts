@@ -50,7 +50,7 @@ export async function POST(
         // 3. Analyze Failure
         // Helper to extract source (zip vs github)
         const source = deployment.source || "manual";
-        const analysis = analyzeFailure(logMessages, source);
+        const analysis = await analyzeFailure(logMessages, source);
 
         // 4. Construct Workdir Path
         // Logic matches runner/repo.ts: prepareWorkDir
@@ -67,7 +67,8 @@ export async function POST(
                     title: "Workspace expired",
                     summary: "The build workspace is no longer available. Re-run the deployment to enable fixing.",
                     confidence: 0.0,
-                    changes: []
+                    changes: [],
+                    fix_steps: analysis.fix_steps || []
                 }
             });
         }

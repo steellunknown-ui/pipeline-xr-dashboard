@@ -6,12 +6,14 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
-import { Loader2, GitBranch, Github, AlertCircle } from "lucide-react";
+import { Loader2, GitBranch, Github, AlertCircle, TriangleAlert, Rocket } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { createProjectFromGitHub } from "@/app/dashboard/actions/projects";
+import { triggerVercelDeploy } from "@/app/dashboard/actions/deployments";
 import { supabase } from "@/lib/supabase-browser";
 import { toast } from "sonner";
 import { GitHubProviderModal } from "@/components/modals/GitHubProviderModal";
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 
 interface Repository {
   id: number;
@@ -34,11 +36,17 @@ export function GitHubRepoSelector() {
   const [creating, setCreating] = useState<number | null>(null);
   const [projectName, setProjectName] = useState("");
   const [selectedRepo, setSelectedRepo] = useState<Repository | null>(null);
+  const [existingProjects, setExistingProjects] = useState<string[]>([]);
+  const [conflictRepo, setConflictRepo] = useState<Repository | null>(null);
   const [hasGitHubAuth, setHasGitHubAuth] = useState(false);
   const [checkingAuth, setCheckingAuth] = useState(true);
   const [showProviderModal, setShowProviderModal] = useState(false);
   const router = useRouter();
   
+  // Vercel-Style Deployment Wizard States
+  const [newProject, setNewProject] = useState<any>(null);
+  const [showEnvPrompt, setShowEnvPrompt] = useState(false);
+  const [deploying, setDeploying] = useState(false);
 
   useEffect(() => {
     checkGitHubAuth();
@@ -137,7 +145,17 @@ export function GitHubRepoSelector() {
         return;
       }
       
-      setRepositories(data.repositories || []);
+      // API returns a plain array
+      setRepositories(Array.isArray(data) ? data : (data.repositories || []));
+      
+      // Fetch existing projects
+      const { data: projects } = await supabase
+        .from('projects')
+        .select('github_repo_url')
+        .not('github_repo_url', 'is', null);
+      
+      setExistingProjects(projects?.map(p => p.github_repo_url) || []);
+      
     } catch (error) {
       console.error("Failed to fetch repositories:", error);
       toast.error("Failed to load repositories");
@@ -163,7 +181,8 @@ export function GitHubRepoSelector() {
 
       if (result.success && result.data) {
         toast.success(`✅ Project "${projectName}" created successfully!`);
-        router.push(`/dashboard/projects`);
+        setNewProject(result.data);
+        setShowEnvPrompt(true);
       } else {
         if (result.isDuplicate) {
           toast.error(`Project already exists for ${repo.full_name}`);
@@ -175,6 +194,31 @@ export function GitHubRepoSelector() {
       toast.error("Failed to create project");
     } finally {
       setCreating(null);
+    }
+  };
+
+  const handleDeployNow = async () => {
+    if (!newProject) return;
+    setDeploying(true);
+    try {
+      const result = await triggerVercelDeploy({
+        projectId: newProject.id,
+        environment: "production",
+        branch: newProject.auto_deploy_branch || selectedRepo?.default_branch || "main"
+      });
+
+      if (result.success && result.data) {
+        toast.success("Deployment started!");
+        router.push(`/dashboard/deployments/${result.data.id}/logs`);
+      } else {
+        toast.error(result.error || "Failed to start deployment");
+        setDeploying(false);
+        router.push(`/dashboard/projects/${newProject.id}/settings`);
+      }
+    } catch (error) {
+      toast.error("Failed to start deployment");
+      setDeploying(false);
+      router.push(`/dashboard/projects/${newProject.id}/settings`);
     }
   };
 
@@ -242,6 +286,75 @@ export function GitHubRepoSelector() {
         onOpenChange={setShowProviderModal}
       />
 
+      {/* Vercel-Style Env Setup Popup */}
+      <Dialog open={showEnvPrompt} onOpenChange={(o) => {
+        if (!o && !deploying) {
+          setShowEnvPrompt(false);
+          router.push(`/dashboard/projects`);
+        }
+      }}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-xl">
+              <div className="w-9 h-9 rounded-full bg-violet-100 dark:bg-violet-900/30 flex items-center justify-center">
+                <Rocket className="w-5 h-5 text-violet-600 dark:text-violet-400" />
+              </div>
+              Ready to Deploy?
+            </DialogTitle>
+            <DialogDescription className="pt-3 text-base text-foreground">
+              Does your project require <strong>Environment Variables</strong> (e.g. Database URL, API Keys)?
+              <br/><br/>
+              If yes, configure them now. Otherwise, we can deploy immediately!
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter className="flex flex-col sm:flex-row gap-2 mt-4 sm:space-x-0">
+            <Button 
+              variant="outline" 
+              className="w-full sm:w-1/2" 
+              disabled={deploying}
+              onClick={() => router.push(`/dashboard/projects/${newProject?.id}/settings?tab=environment`)}
+            >
+              Yes, Configure ENVs
+            </Button>
+            <Button 
+              className="w-full sm:w-1/2 bg-gradient-to-r from-violet-600 to-indigo-600 hover:from-violet-700 hover:to-indigo-700 text-white border-0" 
+              onClick={handleDeployNow}
+              disabled={deploying}
+            >
+              {deploying ? (
+                <><Loader2 className="mr-2 h-4 w-4 animate-spin" /> Deploying...</>
+              ) : (
+                "No, Deploy Now 🚀"
+              )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Already Deployed Conflict Modal */}
+      <Dialog open={!!conflictRepo} onOpenChange={(o) => !o && setConflictRepo(null)}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <div className="w-9 h-9 rounded-full bg-yellow-100 flex items-center justify-center">
+                <TriangleAlert className="w-4 h-4 text-yellow-600" />
+              </div>
+              Repository Already Deployed
+            </DialogTitle>
+            <DialogDescription className="pt-2 text-base">
+              The repository <strong className="text-foreground">{conflictRepo?.full_name}</strong> is already connected to an existing project in Pipeline XR.
+              <br/><br/>
+              Please select a different repository or manage the existing project from your dashboard.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="default" onClick={() => setConflictRepo(null)}>
+              Understood
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
       <div>
         <h2 className="text-2xl font-bold">Select GitHub Repository</h2>
         <p className="text-muted-foreground">
@@ -305,12 +418,18 @@ export function GitHubRepoSelector() {
                 </div>
                 <Button
                   onClick={() => {
-                    setSelectedRepo(repo);
-                    setProjectName(repo.name);
+                    const repoUrl = `https://github.com/${repo.full_name}`;
+                    if (existingProjects.includes(repoUrl)) {
+                      setConflictRepo(repo);
+                    } else {
+                      setSelectedRepo(repo);
+                      setProjectName(repo.name);
+                    }
                   }}
                   disabled={creating !== null}
+                  variant={existingProjects.includes(`https://github.com/${repo.full_name}`) ? "secondary" : "default"}
                 >
-                  Select
+                  {existingProjects.includes(`https://github.com/${repo.full_name}`) ? "Already Deployed" : "Select"}
                 </Button>
               </div>
             </CardContent>
