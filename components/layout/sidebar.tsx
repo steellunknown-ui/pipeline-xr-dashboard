@@ -97,7 +97,7 @@ export function Sidebar() {
         )}
       >
         {/* Logo */}
-        <div className="flex h-16 items-center gap-3 px-5 border-b border-border">
+        <div className="flex h-14 items-center gap-3 px-5 border-b border-border">
           <div className="h-8 w-8 flex items-center justify-center flex-shrink-0 bg-transparent overflow-hidden">
             <Image src="/images/xr-logo.png" alt="XR Logo" width={32} height={32} className="object-contain dark:invert" />
           </div>
@@ -128,7 +128,7 @@ export function Sidebar() {
         )}
       >
         {/* Logo */}
-        <div className="flex h-16 items-center border-b border-border px-[18px] flex-shrink-0">
+        <div className="flex h-14 items-center border-b border-border px-[18px] flex-shrink-0">
           <div className="h-8 w-8 flex items-center justify-center flex-shrink-0 bg-transparent overflow-hidden">
             <Image src="/images/xr-logo.png" alt="XR Logo" width={32} height={32} className="object-contain dark:invert" />
           </div>
