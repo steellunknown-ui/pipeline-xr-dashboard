@@ -66,8 +66,8 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
     return (
       <div className="flex h-screen items-center justify-center bg-background">
         <div className="flex flex-col items-center gap-4">
-          <div className="h-16 w-16 flex items-center justify-center animate-pulse mix-blend-screen overflow-hidden">
-            <Image src="/images/xr-logo.png" alt="Pipeline XR Logo" width={64} height={64} className="object-contain" />
+          <div className="h-16 w-16 flex items-center justify-center animate-pulse overflow-hidden">
+            <Image src="/images/xr-logo.png" alt="Pipeline XR Logo" width={64} height={64} className="object-contain dark:invert" />
           </div>
           <p className="text-sm text-muted-foreground">Loading Pipeline XR...</p>
         </div>
