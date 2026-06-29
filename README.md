@@ -1,97 +1,75 @@
 <div align="center">
   <h1>🚀 Pipeline XR</h1>
-  <p><strong>The AI-Powered Deployment Platform for Frontend Developers</strong></p>
-  <p>
-    Pipeline XR is a modern, Vercel-like deployment platform that doesn't just host your code—it actively helps you fix it when it breaks. Built for developers who want seamless deployments with built-in AI failure recovery.
-  </p>
-  <br />
+  <p><strong>The Intelligent, Autonomous, AI-Powered Deployment Platform</strong></p>
+  <p>Pipeline XR is a next-generation CI/CD dashboard built to seamlessly integrate with GitHub and Vercel. What makes Pipeline XR special is its <strong>Autonomous AI Fixer Engine</strong>—when a deployment fails, the platform automatically analyzes the build logs, generates a code fix, pushes the fix to your GitHub repository, and automatically triggers a re-deployment without human intervention.</p>
 </div>
 
-## 📖 Overview
+---
 
-Pipeline XR simplifies infrastructure and CI/CD pipelines while providing deep, AI-driven observability. When your build fails on traditional platforms, you're left staring at hundreds of lines of obscure logs. Pipeline XR intercepts those failures, reads the logs using advanced large language models (LLMs), and instantly tells you exactly what went wrong and how to fix it.
+## ✨ Features & End-to-End User Flow
 
-**Target Audience:** Frontend Developers, Full-stack Engineers, and DevOps teams who want zero-configuration deployments backed by intelligent debugging.
+Pipeline XR provides a beautiful, frictionless experience from the moment a user logs in to the moment their code is live in production.
 
-## ✨ Key Features
+### 1. 🔐 Secure Authentication & Onboarding
+- **OAuth Integration:** Users can instantly sign in using their **GitHub** or **Google** accounts, securely powered by Supabase Auth.
+- **Interactive Onboarding:** A sleek, glassmorphic onboarding carousel introduces the platform's capabilities before landing users in their unified dashboard.
 
-- **🔗 GitHub Integration**: Connect your repositories and deploy with a single click.
-- **⚡ Vercel-Style Wizard**: Automatic framework detection and zero-config environment variable injection.
-- **📊 Real-time Log Streaming**: Watch your builds execute in real-time via Server-Sent Events (SSE).
-- **🤖 AI Failure Analysis**: Powered by **Nemotron 3 Super (120B)**, Pipeline XR ingests your entire failed build log to identify the exact root cause of a failure.
-- **🛠️ AI Fix Suggester**: Powered by **Poolside Laguna M.1**, Pipeline XR automatically generates surgical code patches to fix your broken deployments.
-- **💬 DevOps XR Assistant**: An integrated chat interface powered by **gpt-oss-20b** to help you understand CI/CD concepts and debug issues on the fly.
-- **⏪ One-Click Rollbacks**: Instantly revert to any previously successful deployment.
+### 2. 🐙 One-Click GitHub Integration
+- **Repository Fetching:** Connect your GitHub account and instantly browse, search, and import your repositories directly into Pipeline XR.
+- **Branch Selection:** Select specific branches for targeted deployments or staging environments.
 
-## 🏗️ System Architecture
+### 3. 🛡️ Pre-Flight Checks & Environment Management
+- **Smart Pre-flight:** Before deploying, the platform automatically prompts the user with a sleek modal to confirm if the project requires Environment Variables.
+- **Inline Secret Management:** Add `Key/Value` pairs directly from the dashboard. Pipeline XR securely encrypts and stores them in Supabase, ready to inject into the Vercel build environment.
 
-Pipeline XR separates operations into a **Control Plane** (the Next.js dashboard) and an **Execution Plane** (isolated Node.js child processes for building).
+### 4. 🧠 The AI Fixer Engine (The Crown Jewel)
+If a deployment fails, Pipeline XR doesn't just give you an error log. It acts as your autonomous Senior DevOps Engineer:
+1. **Log Ingestion:** Automatically captures and analyzes the failing Vercel build logs.
+2. **Multi-Model AI Diagnosis:** Routes the error trace through **OpenRouter** (utilizing top-tier LLMs) to identify the exact root cause of the build failure.
+3. **Automated Code Patching:** The AI generates a perfect code fix for the broken file.
+4. **Auto-Commit to GitHub:** The platform programmatically commits the fix directly to your GitHub repository branch via the GitHub API.
+5. **Self-Healing Redeployment:** Instantly triggers a fresh Vercel build with the newly patched code. 
+6. **Live UI Status:** The entire autonomous process is displayed to the user via beautiful, real-time sliding Toast notifications (e.g., *"🤖 AI analyzing logs..."*, *"✏️ Patching code..."*, *"🚀 Redeploying..."*).
 
-### Tech Stack
+---
 
-- **Frontend:** Next.js 16 (App Router / Turbopack), React, TailwindCSS, shadcn/ui, Framer Motion
-- **Backend:** Node.js, Next.js API Routes, Isolated `child_process` runner
-- **Database:** Supabase PostgreSQL with Row Level Security (RLS)
-- **AI Integration:** OpenRouter Multi-Key Pool (Dedicated API keys to prevent rate limits)
+## 🏗️ Architecture & Tech Stack
+
+Pipeline XR is built with a highly scalable, modern architecture designed for performance and beautiful aesthetics.
+
+- **Frontend:** Next.js 14 (App Router), React, TypeScript
+- **Styling:** Tailwind CSS, Framer Motion (for micro-animations), Shadcn UI
+- **Backend/Database:** Supabase (PostgreSQL, Row Level Security, Auth)
+- **Deployment Infrastructure:** Vercel API (Programmatic Deployments)
+- **AI Infrastructure:** OpenRouter API (Accessing state-of-the-art LLMs)
+- **Version Control:** GitHub REST API
+
+---
+
+## 👨‍💻 For Developers & Recruiters
+
+If you are looking at this repository, this project demonstrates a deep understanding of:
+- **Complex System Orchestration:** Tying together third-party APIs (Vercel, GitHub, Supabase, OpenRouter) into a unified, seamless user experience.
+- **Autonomous AI Agents:** Moving beyond simple "chatbots" to create AI that actively reads files, writes code, and executes git commands on behalf of the user.
+- **Modern UI/UX Design:** Implementing glassmorphism, dynamic gradients, and real-time state feedback to create a premium, "wow-factor" interface.
+- **Production Readiness:** Strict TypeScript adherence, clean architecture, and robust error handling.
+
+---
 
 ## 🚀 Getting Started
 
-Follow these instructions to get a local instance of Pipeline XR up and running.
+To run Pipeline XR locally:
 
-### Prerequisites
+```bash
+# 1. Clone the repository
+git clone https://github.com/steellunknown-ui/pipeline-xr-dashboard.git
 
-- **Node.js** v20.x or higher
-- **npm** or **yarn**
-- **Supabase** Project setup with valid credentials
-- **OpenRouter** Account with API keys
+# 2. Install dependencies
+npm install
 
-### Installation
+# 3. Configure Environment Variables
+# Copy the .env.example to .env.local and add your Supabase, Vercel, GitHub, and OpenRouter keys.
 
-1. **Clone the repository:**
-   ```bash
-   git clone https://github.com/steellunknown-ui/pipeline-xr-dashboard.git
-   cd pipeline-xr-dashboard
-   ```
-
-2. **Install dependencies:**
-   ```bash
-   npm install
-   ```
-
-3. **Set up Environment Variables:**
-   Create a `.env.local` file at the root of the project. You will need Supabase keys and OpenRouter API keys (Chat, Analyze, and Fix keys).
-   ```env
-   NEXT_PUBLIC_SUPABASE_URL=your_supabase_url
-   NEXT_PUBLIC_SUPABASE_ANON_KEY=your_anon_key
-
-   OPENROUTER_CHAT_KEY=your_gpt_oss_key
-   OPENROUTER_ANALYZE_KEY=your_nemotron_key
-   OPENROUTER_FIX_KEY=your_laguna_key
-   ```
-
-4. **Run the build runner compiler:**
-   Pipeline XR uses a custom detached runner that requires pre-compilation.
-   ```bash
-   npm run runner:build
-   ```
-
-5. **Start the development server:**
-   ```bash
-   npm run dev
-   ```
-
-6. Open [http://localhost:3000](http://localhost:3000) to view the dashboard.
-
-## 🎯 The Deployment Lifecycle
-
-Pipeline XR enforces a strict finite state machine sequence for all deployments:
-`QUEUED ➔ CLONING ➔ BUILDING ➔ DEPLOYING ➔ COMPLETED | FAILED`
-
-If the deployment hits the `FAILED` state, the **AI Failure Analyzer** automatically kicks in to diagnose the logs.
-
-## 📄 License
-
-Distributed under the MIT License. See `LICENSE` for more information.
-
----
-<p align="center">Built with precision for seamless platform operations.</p>
+# 4. Run the development server
+npm run dev
+```
