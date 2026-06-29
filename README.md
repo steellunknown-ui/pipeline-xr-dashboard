@@ -1,6 +1,8 @@
 <div align="center">
   <h1>🚀 Pipeline XR</h1>
   <p><strong>The Intelligent, Autonomous, AI-Powered Deployment Platform</strong></p>
+  <p>🌍 <strong>Live Demo:</strong> <a href="https://pipeline-xr-dashboard.vercel.app">https://pipeline-xr-dashboard.vercel.app</a></p>
+  <br/>
   <p>Pipeline XR is a next-generation CI/CD dashboard built to seamlessly integrate with GitHub and Vercel. What makes Pipeline XR special is its <strong>Autonomous AI Fixer Engine</strong>—when a deployment fails, the platform automatically analyzes the build logs, generates a code fix, pushes the fix to your GitHub repository, and automatically triggers a re-deployment without human intervention.</p>
 </div>
 
