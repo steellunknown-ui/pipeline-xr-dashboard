@@ -10,6 +10,7 @@ import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { LogOut, Settings, ChevronRight } from "lucide-react";
 import Image from "next/image";
+import { CommandMenu } from "@/components/ui/command-menu";
 
 interface TopbarProps {
   user?: User | null;
@@ -88,6 +89,7 @@ export function Topbar({ user }: TopbarProps) {
 
       {/* Right side */}
       <div className="flex items-center gap-3">
+        <CommandMenu />
         <ThemeToggle />
 
         <DropdownMenu>

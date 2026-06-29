@@ -1,7 +1,8 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
+import { Accordion, AccordionItem, AccordionTrigger, AccordionContent } from "@/components/ui/accordion";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -532,16 +533,13 @@ export default function DeploymentExplanationPanel({
           ) : explanation ? (
             <div className="space-y-4">
               {/* Status Header */}
-              <div className={`p-3 rounded-lg border ${getStatusColor(explanation.status)}`}>
-                <div className="flex items-center gap-3">
+              <div className={`p-2 rounded-lg border flex items-center justify-between ${getStatusColor(explanation.status)}`}>
+                <div className="flex items-center gap-2">
                   {getStatusIcon(explanation.status)}
-                  <span className="font-medium capitalize">{explanation.status}</span>
+                  <span className="font-medium capitalize text-sm">{explanation.status}</span>
                 </div>
-                {/* PRIORITY 11.1: Lineage Badge */}
                 {explanation.lineage && (
-                  <p className="text-xs text-gray-500 mt-1 ml-8">
-                    {explanation.lineage.label}
-                  </p>
+                  <Badge variant="outline" className="text-xs bg-white/50">{explanation.lineage.label}</Badge>
                 )}
               </div>
 
@@ -558,121 +556,51 @@ export default function DeploymentExplanationPanel({
                 <OperatorStateHUD state={explanation.operatorState} />
               )}
 
-              {/* PRIORITY 12.8: Operator Focus Level */}
-              {explanation.focusLevel && (
-                <div className="space-y-3 mt-6">
-                  <div className="flex items-center gap-2">
-                    <h3 className="font-semibold text-gray-900">Operator focus level</h3>
-                    <Badge
-                      variant="outline"
-                      className={`text-xs ${explanation.focusLevel.level === "HIGH_ATTENTION"
-                        ? "border-red-200 text-red-700 bg-red-50"
-                        : explanation.focusLevel.level === "FOCUS"
-                          ? "border-amber-200 text-amber-700 bg-amber-50"
-                          : explanation.focusLevel.level === "WATCH"
-                            ? "border-blue-200 text-blue-700 bg-blue-50"
-                            : "border-slate-300 text-slate-700 bg-slate-100"
-                        }`}
-                    >
-                      {explanation.focusLevel.level}
-                    </Badge>
-                  </div>
-                  <div className="bg-slate-50 p-4 rounded-lg border border-slate-200 text-slate-700">
-                    <p className="mb-3 font-medium">
-                      {explanation.focusLevel.explanation}
-                    </p>
-                    {explanation.focusLevel.signals.length > 0 && (
-                      <ul className="space-y-2 text-sm">
-                        {explanation.focusLevel.signals.map((signal, idx) => (
-                          <li key={idx} className="flex gap-2">
-                            <span className="text-slate-400">•</span>
-                            <span>{signal}</span>
-                          </li>
-                        ))}
-                      </ul>
-                    )}
-                  </div>
-                </div>
-              )}
-
-              {/* Contextual Filter Line */}
-              <div className="text-[11px] font-medium text-slate-400 uppercase tracking-wider mt-8 mb-4 flex items-center gap-2">
-                <span>Current focus Mode: {explanation.focusLevel?.level || "WATCH"}</span>
-                <span>•</span>
-                <span>
-                  Showing {
-                    explanation.focusLevel?.level === "STABLE" ? "summary" :
-                      explanation.focusLevel?.level === "WATCH" ? "essential intelligence" :
-                        explanation.focusLevel?.level === "FOCUS" ? "focused intelligence" :
-                          "all intelligence"
-                  } only
-                </span>
-              </div>
-
-              {/* PRIORITY 12.4: Deployment Summary */}
-              {deriveIntelligenceVisibility(explanation.focusLevel?.level || "WATCH").summary && explanation.summary && (
-                <div className="space-y-3">
-                  <h3 className="font-semibold text-gray-900">Deployment summary</h3>
-                  <div className="bg-slate-50 p-4 rounded-lg border border-slate-200 shadow-sm">
-                    <p className="font-bold text-slate-900 mb-3">{explanation.summary.headline}</p>
-
-                    {explanation.summary.whatHappened.length > 0 && (
-                      <ul className="space-y-2 mb-4">
-                        {explanation.summary.whatHappened.map((item, idx) => (
-                          <li key={idx} className="flex items-start gap-2 text-sm text-slate-700">
-                            <span className="text-slate-400 mt-1">•</span>
-                            <span>{item}</span>
-                          </li>
-                        ))}
-                      </ul>
-                    )}
-
-                    <div className="bg-slate-100 p-3 rounded text-sm text-slate-600 border border-slate-200">
-                      <strong>Next step:</strong> {explanation.summary.recommendedNextStep}
+              {/* Focus Level & Summary in a compact grid */}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                {/* Operator Focus Level */}
+                {explanation.focusLevel && (
+                  <div className="bg-slate-50 p-3 rounded-lg border border-slate-200 flex flex-col">
+                    <div className="flex items-center justify-between mb-2">
+                      <h3 className="font-semibold text-slate-900 text-xs uppercase">Focus Level</h3>
+                      <Badge variant="outline" className="text-[10px] py-0">{explanation.focusLevel.level}</Badge>
                     </div>
+                    <p className="text-xs text-slate-700 leading-relaxed">{explanation.focusLevel.explanation}</p>
                   </div>
-                </div>
-              )}
+                )}
 
-              {/* PRIORITY 11.3: Deployment Integrity (Frozen Status) */}
-              {deriveIntelligenceVisibility(explanation.focusLevel?.level || "WATCH").summary && explanation.freeze?.frozen && (
-                <div className="space-y-2">
-                  <h3 className="font-semibold text-gray-900 flex items-center gap-2">
-                    <Lock className="h-4 w-4 text-slate-500" />
-                    Deployment integrity
-                  </h3>
-                  <div className="bg-slate-50 p-3 rounded-lg border border-slate-200">
-                    <p className="text-sm text-slate-700">
-                      This deployment is frozen to preserve production integrity.
-                      To make changes, create a new deployment instead.
-                    </p>
+                {/* Deployment Summary */}
+                {deriveIntelligenceVisibility(explanation.focusLevel?.level || "WATCH").summary && explanation.summary && (
+                  <div className="bg-slate-50 p-3 rounded-lg border border-slate-200 flex flex-col">
+                     <h3 className="font-semibold text-slate-900 text-xs uppercase mb-2">Summary</h3>
+                     <p className="text-xs font-bold text-slate-900 mb-1">{explanation.summary.headline}</p>
+                     <p className="text-xs text-slate-600 truncate">Next: {explanation.summary.recommendedNextStep}</p>
                   </div>
+                )}
+              </div>
+
+              {/* Core Context (What/Why/Next) */}
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                <div className="bg-gray-50 p-3 rounded-lg">
+                  <h3 className="font-semibold text-gray-900 text-xs uppercase mb-1">What's happening</h3>
+                  <p className="text-xs text-gray-700">{explanation.whatHappening}</p>
                 </div>
-              )}
-
-              {/* What's Happening */}
-              <div className="space-y-2">
-                <h3 className="font-semibold text-gray-900">What's happening</h3>
-                <p className="text-gray-700 bg-gray-50 p-3 rounded-lg">
-                  {explanation.whatHappening}
-                </p>
+                <div className="bg-gray-50 p-3 rounded-lg">
+                  <h3 className="font-semibold text-gray-900 text-xs uppercase mb-1">Why this happened</h3>
+                  <p className="text-xs text-gray-700">{explanation.whyHappened}</p>
+                </div>
+                <div className="bg-gray-50 p-3 rounded-lg">
+                  <h3 className="font-semibold text-gray-900 text-xs uppercase mb-1">Next action</h3>
+                  <p className="text-xs text-gray-700">{explanation.nextAction}</p>
+                </div>
               </div>
 
-              {/* Why This Happened */}
-              <div className="space-y-2">
-                <h3 className="font-semibold text-gray-900">Why this happened</h3>
-                <p className="text-gray-700 bg-gray-50 p-3 rounded-lg">
-                  {explanation.whyHappened}
-                </p>
-              </div>
-
-              {/* Next Action */}
-              <div className="space-y-2">
-                <h3 className="font-semibold text-gray-900">Recommended next action</h3>
-                <p className="text-gray-700 bg-gray-50 p-3 rounded-lg">
-                  {explanation.nextAction}
-                </p>
-              </div>
+              <Accordion type="single" collapsible className="w-full">
+                <AccordionItem value="intelligence">
+                  <AccordionTrigger className="text-sm font-semibold py-2">
+                    Advanced Intelligence Insights
+                  </AccordionTrigger>
+                  <AccordionContent className="space-y-4 pt-2">
 
               {/* PRIORITY 8.1: Trust Signals */}
               {deriveIntelligenceVisibility(explanation.focusLevel?.level || "WATCH").trustSignals && explanation.trustSignals && (
@@ -1041,6 +969,10 @@ export default function DeploymentExplanationPanel({
                   )}
                 </div>
               )}
+
+                  </AccordionContent>
+                </AccordionItem>
+              </Accordion>
 
               {/* STEP 6.2.3: Quick Actions */}
               {explanation.recommendedActions && explanation.recommendedActions.length > 0 && (

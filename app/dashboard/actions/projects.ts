@@ -308,6 +308,8 @@ export async function createProjectFromGitHub(data: {
         requires_env: requiresEnv,
         classification_reason: classificationReason,
         classification_risk: classificationRisk,
+        production_alias_url: null, // Will be updated below if found
+        vercel_project_id: null,
       })
       .select()
       .single();
@@ -324,9 +326,81 @@ export async function createProjectFromGitHub(data: {
       metadata: { name: data.name, repo: data.full_name, source: 'github' },
     });
 
+    // Try to fetch existing Vercel project and alias
+    const vercelToken = process.env.VERCEL_API_TOKEN;
+    if (vercelToken) {
+      try {
+        const teamIdStr = process.env.VERCEL_TEAM_ID ? `?teamId=${process.env.VERCEL_TEAM_ID}` : '';
+        const searchRes = await fetch(`https://api.vercel.com/v9/projects${teamIdStr}`, {
+          headers: { Authorization: `Bearer ${vercelToken}` }
+        });
+        
+        if (searchRes.ok) {
+          const searchData = await searchRes.json();
+          // Find matching project by repo full name or project name
+          const vProject = searchData.projects?.find((p: any) => 
+            p.link?.repo === data.full_name || 
+            p.name.toLowerCase() === data.name.toLowerCase().replace(/[^a-z0-9]/g, '-')
+          );
+          
+          if (vProject) {
+            // Find production alias
+            const prodAlias = vProject.targets?.production?.alias?.[0] || 
+                              vProject.alias?.[0]?.domain || 
+                              `${vProject.name}.vercel.app`;
+                              
+            if (prodAlias) {
+              const fullAlias = prodAlias.startsWith('http') ? prodAlias : `https://${prodAlias}`;
+              await supabase.from("projects").update({
+                vercel_project_id: vProject.id,
+                production_alias_url: fullAlias
+              }).eq("id", project.id);
+            }
+          }
+        }
+      } catch (e) {
+        console.error("Failed to fetch vercel alias during import:", e);
+      }
+    }
+
     return { success: true, data: project };
   } catch (error) {
     return { success: false, error: "Failed to create project from GitHub" };
+  }
+}
+
+export async function createProjectFromZip(data: { name: string; zip_url: string }) {
+  try {
+    const supabase = await getSupabaseServer();
+    const { data: { user }, error: authError } = await supabase.auth.getUser();
+    if (authError || !user) return { success: false, error: "Unauthorized" };
+
+    const { data: project, error } = await supabase
+      .from("projects")
+      .insert({
+        name: data.name,
+        user_id: user.id,
+        source_type: "zip",
+        zip_url: data.zip_url,
+        project_type: "STATIC",
+        requires_env: false,
+      })
+      .select()
+      .single();
+
+    if (error) return { success: false, error: error.message };
+
+    await createActivityLog({
+      event: "project_created",
+      user_id: user.id,
+      project_id: project.id,
+      description: `Created project from Drag & Drop upload`,
+      metadata: { name: data.name, source: 'zip' },
+    });
+
+    return { success: true, data: project };
+  } catch (error) {
+    return { success: false, error: "Failed to create project from zip" };
   }
 }
 

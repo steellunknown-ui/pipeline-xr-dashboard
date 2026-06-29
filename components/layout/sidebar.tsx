@@ -22,7 +22,6 @@ const navigation = [
   { name: "Overview", href: "/dashboard", icon: LayoutDashboard, exact: true },
   { name: "Projects", href: "/dashboard/projects", icon: FolderKanban },
   { name: "Deployments", href: "/dashboard/deployments", icon: Rocket },
-  { name: "Environment", href: "/dashboard/environment", icon: Key },
   { name: "Activity", href: "/dashboard/activity", icon: Activity },
   { name: "Settings", href: "/dashboard/settings", icon: Settings },
 ];

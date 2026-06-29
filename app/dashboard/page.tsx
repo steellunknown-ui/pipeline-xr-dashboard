@@ -343,13 +343,24 @@ export default function DashboardPage() {
                     </div>
                   </div>
                   <div className="flex items-center gap-2 flex-shrink-0">
-                    {deploy.deployment_url && deploy.status === "success" && (
-                      <button
-                        onClick={(e) => { e.stopPropagation(); window.open(deploy.deployment_url!, "_blank"); }}
-                        className="p-1.5 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+                    {deploy.status === "success" && (
+                      <a
+                        href={deploy.alias_url || '#'}
+                        target={deploy.alias_url ? "_blank" : undefined}
+                        rel={deploy.alias_url ? "noopener noreferrer" : undefined}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          if (!deploy.alias_url) e.preventDefault();
+                        }}
+                        className={`p-1.5 rounded-md transition-colors inline-flex items-center justify-center ${
+                          deploy.alias_url 
+                            ? 'text-muted-foreground hover:text-foreground hover:bg-muted' 
+                            : 'text-muted-foreground/30 cursor-not-allowed'
+                        }`}
+                        title={!deploy.alias_url ? 'Production URL unavailable' : 'Visit Site'}
                       >
                         <ExternalLink className="w-3.5 h-3.5" />
-                      </button>
+                      </a>
                     )}
                     <ArrowRight className="w-4 h-4 text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity" />
                   </div>
@@ -381,7 +392,7 @@ export default function DashboardPage() {
               >
                 <Card
                   className="cursor-pointer bg-card/80 backdrop-blur-sm border-border/40 shadow-sm hover:shadow-xl transition-all duration-300 hover:-translate-y-1.5 hover:scale-[1.02] hover:border-primary/20 group relative overflow-hidden"
-                  onClick={() => router.push(`/dashboard/projects/${project.id}/settings`)}
+                  onClick={() => router.push(`/dashboard/projects/${project.id}`)}
                 >
                   <div className="absolute inset-0 bg-gradient-to-br from-primary/0 via-primary/0 to-primary/5 opacity-0 group-hover:opacity-100 transition-opacity duration-300 pointer-events-none" />
                   <CardContent className="p-4">

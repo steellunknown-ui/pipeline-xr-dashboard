@@ -46,7 +46,7 @@ export async function POST(
         commit_sha,
         environment,
         status,
-        projects!inner(user_id)
+        projects!inner(user_id, name)
       `)
             .eq("id", deploymentId)
             .eq("projects.user_id", user.id)
@@ -120,6 +120,12 @@ export async function POST(
             actorLabel: "Manual action",
             message: AuditMessages.redeployTriggered(deploymentId),
         });
+
+        // Trigger Vercel Build Engine
+        const project = Array.isArray(original.projects) ? original.projects[0] : original.projects;
+        const projectSlug = project?.name?.toLowerCase().replace(/[^a-z0-9-]/g, "-").replace(/-+/g, "-").replace(/^-|-$/g, "") || "project";
+        const { DeploymentEngine } = await import("@/lib/deployment-engine");
+        DeploymentEngine.startDeployment(newDeployment.id, projectSlug).catch(console.error);
 
         return NextResponse.json({
             success: true,

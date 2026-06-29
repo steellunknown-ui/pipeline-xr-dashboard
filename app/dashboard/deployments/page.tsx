@@ -443,14 +443,24 @@ export default function DeploymentsPage() {
                             Explain
                           </Button>
                           <DisabledComparisonButton deploymentCount={deployments.length} />
-                          {deployment.deployment_url && deployment.status === "success" && (
+                          {deployment.status === "success" && (
                             <Button
                               size="sm"
                               variant="outline"
-                              onClick={() => window.open(deployment.deployment_url!, '_blank')}
+                              asChild={!!deployment.alias_url}
+                              disabled={!deployment.alias_url}
+                              title={deployment.alias_status === 'pending' ? 'Assigning Production URL...' : deployment.alias_status === 'failed' ? 'URL Unavailable' : ''}
                             >
-                              <ExternalLink className="h-3 w-3 mr-1" />
-                              Visit Site
+                              {deployment.alias_url ? (
+                                <a href={deployment.alias_url} target="_blank" rel="noopener noreferrer">
+                                  <ExternalLink className="h-3 w-3 mr-1" />
+                                  Visit Site
+                                </a>
+                              ) : (
+                                <span>
+                                  {deployment.alias_status === 'pending' ? 'Assigning...' : 'Unavailable'}
+                                </span>
+                              )}
                             </Button>
                           )}
                           <Button

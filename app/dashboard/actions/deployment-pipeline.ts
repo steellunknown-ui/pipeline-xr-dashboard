@@ -1,6 +1,8 @@
 "use server";
 
 import { getSupabaseServer } from "@/lib/supabase-server";
+import { disableDeploymentProtection } from "./vercel-protection";
+import { pollForAliasWithRetries } from '@/lib/alias-resolver';
 
 async function insertLogIfNew(deploymentId: string, userId: string, message: string, level: string) {
   const supabase = await getSupabaseServer();
@@ -106,6 +108,20 @@ export async function runDeploymentPipeline(deploymentId: string) {
       .from("deployments")
       .update({ vercel_deployment_id: vercelData.id })
       .eq("id", deploymentId);
+
+    if (vercelData.projectId) {
+      // Disable Vercel Deployment Protection for smooth previews
+      await disableDeploymentProtection(vercelData.projectId);
+      
+      // Store the Vercel project ID if we don't have it yet
+      await supabase
+        .from("projects")
+        .update({ vercel_project_id: vercelData.projectId })
+        .eq("id", deployment.projects.id);
+        
+      // Poll for alias asynchronously
+      pollForAliasWithRetries(deploymentId, vercelData.id, deployment.projects.id, vercelToken).catch(e => console.error("Alias polling failed:", e));
+    }
 
     await insertLogIfNew(deploymentId, user.id, "🚀 Deployment started on Vercel", "info");
 

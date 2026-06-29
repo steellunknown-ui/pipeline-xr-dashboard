@@ -14,6 +14,8 @@ import { supabase } from "@/lib/supabase-browser";
 import { toast } from "sonner";
 import { GitHubProviderModal } from "@/components/modals/GitHubProviderModal";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Textarea } from "@/components/ui/textarea";
+import { addEnvVariable } from "@/app/dashboard/actions/environment";
 
 interface Repository {
   id: number;
@@ -46,6 +48,8 @@ export function GitHubRepoSelector() {
   // Vercel-Style Deployment Wizard States
   const [newProject, setNewProject] = useState<any>(null);
   const [showEnvPrompt, setShowEnvPrompt] = useState(false);
+  const [showEnvEditor, setShowEnvEditor] = useState(false);
+  const [envInput, setEnvInput] = useState("");
   const [deploying, setDeploying] = useState(false);
 
   useEffect(() => {
@@ -197,6 +201,41 @@ export function GitHubRepoSelector() {
     }
   };
 
+  const handleSaveEnvsAndDeploy = async () => {
+    if (!newProject) return;
+    setDeploying(true);
+
+    try {
+      // Parse .env input
+      if (envInput.trim()) {
+        const lines = envInput.split('\n');
+        for (const line of lines) {
+          const match = line.match(/^\s*([\w.-]+)\s*=\s*(.*)?\s*$/);
+          if (match) {
+            const key = match[1];
+            let value = match[2] || '';
+            // Strip quotes if any
+            if (value.startsWith('"') && value.endsWith('"')) value = value.slice(1, -1);
+            if (value.startsWith("'") && value.endsWith("'")) value = value.slice(1, -1);
+            
+            await addEnvVariable({
+              key,
+              value,
+              environment: "production",
+              project_id: newProject.id
+            });
+          }
+        }
+        toast.success("Environment variables saved!");
+      }
+      
+      await handleDeployNow();
+    } catch (error) {
+      toast.error("Failed to save environment variables");
+      setDeploying(false);
+    }
+  };
+
   const handleDeployNow = async () => {
     if (!newProject) return;
     setDeploying(true);
@@ -286,38 +325,42 @@ export function GitHubRepoSelector() {
         onOpenChange={setShowProviderModal}
       />
 
-      {/* Vercel-Style Env Setup Popup */}
+      {/* Vercel-Style Env Setup Popup (Black & White Theme) */}
       <Dialog open={showEnvPrompt} onOpenChange={(o) => {
         if (!o && !deploying) {
           setShowEnvPrompt(false);
           router.push(`/dashboard/projects`);
         }
       }}>
-        <DialogContent className="max-w-md">
+        <DialogContent className="max-w-md bg-black text-white border-zinc-800">
           <DialogHeader>
-            <DialogTitle className="flex items-center gap-2 text-xl">
-              <div className="w-9 h-9 rounded-full bg-violet-100 dark:bg-violet-900/30 flex items-center justify-center">
-                <Rocket className="w-5 h-5 text-violet-600 dark:text-violet-400" />
+            <DialogTitle className="flex items-center gap-2 text-xl text-white">
+              <div className="w-9 h-9 rounded-full bg-zinc-900 border border-zinc-800 flex items-center justify-center">
+                <Rocket className="w-5 h-5 text-zinc-300" />
               </div>
-              Ready to Deploy?
+              Ready to Deploy
             </DialogTitle>
-            <DialogDescription className="pt-3 text-base text-foreground">
+            <DialogDescription className="pt-3 text-base text-zinc-400">
               Does your project require <strong>Environment Variables</strong> (e.g. Database URL, API Keys)?
               <br/><br/>
-              If yes, configure them now. Otherwise, we can deploy immediately!
+              If yes, click Yes to configure them now. Otherwise, we can deploy immediately!
             </DialogDescription>
           </DialogHeader>
+          
           <DialogFooter className="flex flex-col sm:flex-row gap-2 mt-4 sm:space-x-0">
             <Button 
               variant="outline" 
-              className="w-full sm:w-1/2" 
+              className="w-full sm:w-1/2 border-zinc-700 text-zinc-300 hover:bg-zinc-800 hover:text-white" 
               disabled={deploying}
-              onClick={() => router.push(`/dashboard/projects/${newProject?.id}/settings?tab=environment`)}
+              onClick={() => {
+                 setShowEnvPrompt(false);
+                 router.push(`/dashboard/projects/${newProject?.id}`);
+              }}
             >
               Yes, Configure ENVs
             </Button>
             <Button 
-              className="w-full sm:w-1/2 bg-gradient-to-r from-violet-600 to-indigo-600 hover:from-violet-700 hover:to-indigo-700 text-white border-0" 
+              className="w-full sm:w-1/2 bg-white text-black hover:bg-zinc-200 border-0" 
               onClick={handleDeployNow}
               disabled={deploying}
             >
@@ -362,39 +405,49 @@ export function GitHubRepoSelector() {
         </p>
       </div>
 
-      {selectedRepo && (
-        <Card>
-          <CardHeader>
-            <CardTitle>Project Configuration</CardTitle>
-            <CardDescription>
-              Configure your project for {selectedRepo.full_name}
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <div>
-              <Label htmlFor="projectName">Project Name</Label>
+      {/* Black & White Create Project Popup */}
+      <Dialog open={!!selectedRepo && !showEnvPrompt} onOpenChange={(o) => !o && setSelectedRepo(null)}>
+        <DialogContent className="max-w-md bg-black text-white border-zinc-800">
+          <DialogHeader>
+            <DialogTitle className="text-xl text-white">Create Project</DialogTitle>
+            <DialogDescription className="text-zinc-400">
+              Configure your project for {selectedRepo?.full_name}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 py-4">
+            <div className="space-y-2">
+              <Label htmlFor="projectName" className="text-zinc-300">Project Name</Label>
               <Input
                 id="projectName"
+                className="bg-zinc-900 border-zinc-800 text-white focus-visible:ring-zinc-700"
                 value={projectName}
                 onChange={(e) => setProjectName(e.target.value)}
                 placeholder="Enter project name"
               />
             </div>
-            <div className="flex gap-2">
-              <Button
-                onClick={() => createProject(selectedRepo)}
-                disabled={creating === selectedRepo.id || !projectName.trim()}
-              >
-                {creating === selectedRepo.id && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-                Create Project
-              </Button>
-              <Button variant="outline" onClick={() => setSelectedRepo(null)}>
-                Cancel
-              </Button>
-            </div>
-          </CardContent>
-        </Card>
-      )}
+          </div>
+          <DialogFooter className="flex gap-2 sm:justify-between">
+            <Button 
+              variant="outline" 
+              className="border-zinc-700 text-zinc-300 hover:bg-zinc-800 hover:text-white flex-1" 
+              onClick={() => setSelectedRepo(null)}
+            >
+              Cancel
+            </Button>
+            <Button
+              className="bg-white text-black hover:bg-zinc-200 flex-1"
+              onClick={() => selectedRepo && createProject(selectedRepo)}
+              disabled={creating === selectedRepo?.id || !projectName.trim()}
+            >
+              {creating === selectedRepo?.id ? (
+                <><Loader2 className="mr-2 h-4 w-4 animate-spin" /> Creating...</>
+              ) : (
+                "Create Project"
+              )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       <div className="grid gap-4">
         {repositories.map((repo) => (

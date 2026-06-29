@@ -4,6 +4,7 @@ import { useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { Button } from "@/components/ui/button";
 import { Github, Rocket, Shield, Zap, CheckCircle, ArrowRight, X } from "lucide-react";
+import { useRouter } from "next/navigation";
 
 interface OnboardingFlowProps {
   open: boolean;
@@ -153,6 +154,7 @@ const VisualMockup = ({ type }: { type: string }) => {
 export function OnboardingFlow({ open, onComplete }: OnboardingFlowProps) {
   const [currentSlide, setCurrentSlide] = useState(0);
   const [direction, setDirection] = useState(1);
+  const router = useRouter();
 
   const goNext = () => {
     if (currentSlide < slides.length - 1) {
@@ -160,6 +162,7 @@ export function OnboardingFlow({ open, onComplete }: OnboardingFlowProps) {
       setCurrentSlide((p) => p + 1);
     } else {
       onComplete();
+      router.push("/dashboard/projects/github");
     }
   };
 

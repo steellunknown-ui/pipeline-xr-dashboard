@@ -53,8 +53,10 @@ export async function POST(
         const analysis = await analyzeFailure(logMessages, source);
 
         // 4. Construct Workdir Path
-        // Logic matches runner/repo.ts: prepareWorkDir
-        const workdir = path.join(os.tmpdir(), "pipelinexr", deploymentId);
+        let workdir = path.join(os.tmpdir(), `pipeline-xr-gh-${deploymentId}`);
+        if (!fs.existsSync(workdir)) {
+            workdir = path.join(os.tmpdir(), `pipeline-xr-${deploymentId}`);
+        }
 
         // Verify workdir exists
         if (!fs.existsSync(workdir)) {

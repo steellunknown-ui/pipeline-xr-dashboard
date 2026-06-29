@@ -6,11 +6,19 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
-import { ArrowLeft, Terminal, Rocket, Brain, RefreshCw } from "lucide-react";
+import { ArrowLeft, Terminal, Rocket, Brain, RefreshCw, CheckCircle2, ChevronRight, Copy, TerminalSquare, AlertCircle, Loader2, XCircle, Clock, Zap, FileCode2, ShieldAlert, Plus } from "lucide-react";
 import { supabase } from "@/lib/supabase-browser";
 import { runDeploymentPipeline } from "@/app/dashboard/actions/deployment-pipeline";
 import { toast } from "sonner";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from "@/components/ui/alert-dialog";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { 
+  Dialog, DialogContent, DialogDescription, DialogFooter, 
+  DialogHeader, DialogTitle, DialogTrigger 
+} from "@/components/ui/dialog";
+import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
+import { addEnvVariable } from "@/app/dashboard/actions/environment";
 import type { DeploymentLog } from "@/lib/types/database";
 import { cn } from "@/lib/utils";
 import { GradientBar } from "@/components/ui/gradient-bar";
@@ -31,16 +39,26 @@ export default function DeploymentLogsPage() {
   const [deployment, setDeployment] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [running, setRunning] = useState(false);
+  const [redeploying, setRedeploying] = useState(false);
   const [showConfirm, setShowConfirm] = useState(false);
   const [showPreflightCheck, setShowPreflightCheck] = useState(false);
+  const [needsEnv, setNeedsEnv] = useState<"no" | "yes" | null>(null);
+  const [envKey, setEnvKey] = useState("");
+  const [envValue, setEnvValue] = useState("");
+  const [addingEnv, setAddingEnv] = useState(false);
   const [showExplanation, setShowExplanation] = useState(false);
-  const [redeploying, setRedeploying] = useState(false);
+
+  // AI Fixer state
+  const [showFixModal, setShowFixModal] = useState(false);
+  const [fixStrategy, setFixStrategy] = useState<'direct_push' | 'pull_request'>('direct_push');
+  const [isStartingFix, setIsStartingFix] = useState(false);
+  
   const logsEndRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     fetchData();
 
-    const channel = supabase
+    const logChannel = supabase
       .channel(`deployment_logs:${deploymentId}`)
       .on(
         'postgres_changes',
@@ -51,13 +69,41 @@ export default function DeploymentLogsPage() {
           filter: `deployment_id=eq.${deploymentId}`,
         },
         (payload) => {
-          setLogs((prev) => [...prev, payload.new as DeploymentLog]);
+          const newLog = payload.new as DeploymentLog;
+          setLogs((prev) => [...prev, newLog]);
+          
+          // Pop up a toast for AI Fixer events so the user knows what's happening in the background
+          const txt = newLog.message || '';
+          if (txt.startsWith('🤖') || txt.startsWith('🧠') || txt.startsWith('📥') || txt.startsWith('✏️') || txt.startsWith('⚙️') || txt.startsWith('🔨') || txt.startsWith('🚀') || txt.startsWith('🔀')) {
+            toast.info(txt, {
+              duration: 4000,
+              position: 'bottom-right',
+              icon: '✨'
+            });
+          }
+        }
+      )
+      .subscribe();
+
+    const statusChannel = supabase
+      .channel(`deployment_status:${deploymentId}`)
+      .on(
+        'postgres_changes',
+        {
+          event: 'UPDATE',
+          schema: 'public',
+          table: 'deployments',
+          filter: `id=eq.${deploymentId}`,
+        },
+        (payload) => {
+          setDeployment((prev: any) => prev ? { ...prev, ...payload.new } : payload.new);
         }
       )
       .subscribe();
 
     return () => {
-      supabase.removeChannel(channel);
+      supabase.removeChannel(logChannel);
+      supabase.removeChannel(statusChannel);
     };
   }, [deploymentId]);
 
@@ -95,53 +141,32 @@ export default function DeploymentLogsPage() {
     return () => clearInterval(interval);
   }, [deployment?.vercel_deployment_id, deployment?.status, deploymentId]);
 
-  // Real-time Vercel Logs (SSE)
-  useEffect(() => {
-    if (!deployment || !deployment.vercel_deployment_id) return;
-    if (deployment.status !== "building" && deployment.status !== "pending") return;
-
-    const eventSource = new EventSource(`/api/deployments/${deploymentId}/logs`);
-    
-    eventSource.onmessage = (event) => {
-      try {
-        const data = JSON.parse(event.data);
-        if (data.type === "stdout" || data.type === "stderr") {
-          const logText = data.payload.text;
-          const newLog: DeploymentLog = {
-            id: `vercel-${Date.now()}-${Math.random()}`,
-            deployment_id: deploymentId,
-            user_id: deployment.user_id,
-            message: logText,
-            level: data.type === "stderr" ? "error" : "info",
-            created_at: new Date(data.payload.date || Date.now()).toISOString()
-          };
-          setLogs((prev) => [...prev, newLog]);
-        } else if (data.type === "command") {
-          const newLog: DeploymentLog = {
-            id: `vercel-${Date.now()}-${Math.random()}`,
-            deployment_id: deploymentId,
-            user_id: deployment.user_id,
-            message: `> ${data.payload.text}`,
-            level: "info",
-            created_at: new Date(data.payload.date || Date.now()).toISOString()
-          };
-          setLogs((prev) => [...prev, newLog]);
-        }
-      } catch (err) {}
-    };
-
-    eventSource.onerror = () => {
-      eventSource.close();
-    };
-
-    return () => {
-      eventSource.close();
-    };
-  }, [deployment?.vercel_deployment_id, deployment?.status, deploymentId, deployment?.user_id]);
-
   useEffect(() => {
     logsEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [logs]);
+
+  // Auto-Open AI Explanation Panel on Failure
+  useEffect(() => {
+    if (deployment?.status === 'failed') {
+      setShowExplanation(true);
+    }
+  }, [deployment?.status]);
+
+  const previousStatus = useRef<string | undefined>(deployment?.status);
+
+  // Track status transitions
+  useEffect(() => {
+    if (deployment?.status) {
+      if (previousStatus.current === 'deploying' && deployment.status === 'success' && deployment.project_id) {
+        toast.success("Deployment successful! Redirecting to dashboard...");
+        // Add a slight delay so they can see the final logs before redirecting
+        setTimeout(() => {
+          router.push(`/dashboard/projects/${deployment.project_id}`);
+        }, 1500);
+      }
+      previousStatus.current = deployment.status;
+    }
+  }, [deployment?.status, deployment?.project_id, router]);
 
   async function fetchData() {
     setLoading(true);
@@ -192,6 +217,25 @@ export default function DeploymentLogsPage() {
     setShowPreflightCheck(true);
   };
 
+  const handleAddEnv = async () => {
+    if (!envKey || !envValue || !deployment?.project_id) return toast.error("Key and Value required");
+    setAddingEnv(true);
+    const res = await addEnvVariable({
+      key: envKey,
+      value: envValue,
+      environment: "production",
+      project_id: deployment.project_id
+    });
+    setAddingEnv(false);
+    if (res.success) {
+      toast.success(`Added ${envKey}`);
+      setEnvKey("");
+      setEnvValue("");
+    } else {
+      toast.error(res.error || "Failed to add variable");
+    }
+  };
+
   async function handleRedeploy() {
     if (!deployment) return;
     setRedeploying(true);
@@ -210,6 +254,29 @@ export default function DeploymentLogsPage() {
       toast.error("Failed to re-deploy");
     } finally {
       setRedeploying(false);
+    }
+  }
+
+  async function handleStartAiFix() {
+    setIsStartingFix(true);
+    try {
+      const res = await fetch('/api/ai-fix', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ deploymentId, strategy: fixStrategy })
+      });
+      const data = await res.json();
+      if (res.ok && data.success) {
+        toast.success("AI Fix Engine started!");
+        setShowFixModal(false);
+        // The logs will naturally update via realtime
+      } else {
+        toast.error(data.error || "Failed to start AI Fixer");
+      }
+    } catch (err) {
+      toast.error("An error occurred while starting AI Fixer");
+    } finally {
+      setIsStartingFix(false);
     }
   }
 
@@ -284,8 +351,20 @@ export default function DeploymentLogsPage() {
             <RefreshCw className={`h-4 w-4 mr-2 ${redeploying ? 'animate-spin' : ''}`} />
             {redeploying ? 'Creating...' : 'Re-deploy'}
           </Button>
-          <AlertDialog open={showConfirm} onOpenChange={setShowConfirm}>
-            <AlertDialogTrigger asChild>
+
+          {deployment?.status === 'failed' && (
+            <Button
+              className="bg-indigo-600 hover:bg-indigo-700 text-white shadow-lg shadow-indigo-500/20"
+              size="sm"
+              onClick={() => setShowFixModal(true)}
+            >
+              <FileCode2 className="h-4 w-4 mr-2" />
+              Fix with Agent
+            </Button>
+          )}
+
+          <Dialog open={showConfirm} onOpenChange={setShowConfirm}>
+            <DialogTrigger asChild>
               <Button
                 disabled={running || deployment?.status === 'building'}
                 size="sm"
@@ -293,23 +372,83 @@ export default function DeploymentLogsPage() {
                 <Rocket className="h-4 w-4 mr-2" />
                 {running ? 'Running...' : 'Run Deployment'}
               </Button>
-            </AlertDialogTrigger>
-            <AlertDialogContent>
-              <AlertDialogHeader>
-                <AlertDialogTitle>Confirm Deployment</AlertDialogTitle>
-                <AlertDialogDescription>
-                  Are you sure you want to start the deployment? This will build and deploy your application to {deployment?.environment}.
-                </AlertDialogDescription>
-              </AlertDialogHeader>
-              <AlertDialogFooter>
-                <AlertDialogCancel>Cancel</AlertDialogCancel>
-                <AlertDialogAction onClick={handlePreflightCheck}>
-                  <Rocket className="h-4 w-4 mr-2" />
-                  Check Risks & Deploy
-                </AlertDialogAction>
-              </AlertDialogFooter>
-            </AlertDialogContent>
-          </AlertDialog>
+            </DialogTrigger>
+            <DialogContent className="sm:max-w-md bg-zinc-50 dark:bg-zinc-950 border dark:border-zinc-800">
+              <DialogHeader>
+                <DialogTitle>Deployment Pre-flight Check</DialogTitle>
+                <DialogDescription>
+                  Before we launch this project, we need to verify its configuration.
+                </DialogDescription>
+              </DialogHeader>
+              
+              <div className="space-y-6 py-4">
+                <div className="space-y-4">
+                  <Label className="text-base font-semibold">Does this project require Environment Variables?</Label>
+                  <RadioGroup 
+                    value={needsEnv || ""} 
+                    onValueChange={(val) => setNeedsEnv(val as "yes" | "no")}
+                    className="flex gap-4"
+                  >
+                    <div className="flex items-center space-x-2 border dark:border-zinc-800 p-3 rounded-lg flex-1 cursor-pointer" onClick={() => setNeedsEnv("no")}>
+                      <RadioGroupItem value="no" id="r1" />
+                      <Label htmlFor="r1" className="cursor-pointer">No, deploy immediately</Label>
+                    </div>
+                    <div className="flex items-center space-x-2 border dark:border-zinc-800 p-3 rounded-lg flex-1 cursor-pointer" onClick={() => setNeedsEnv("yes")}>
+                      <RadioGroupItem value="yes" id="r2" />
+                      <Label htmlFor="r2" className="cursor-pointer">Yes, add variables</Label>
+                    </div>
+                  </RadioGroup>
+                </div>
+
+                {needsEnv === "yes" && (
+                  <div className="space-y-3 p-4 bg-zinc-100 dark:bg-zinc-900 rounded-lg border dark:border-zinc-800 animate-in fade-in slide-in-from-top-4">
+                    <h4 className="text-sm font-medium">Add Production Variables</h4>
+                    <div className="flex gap-2">
+                      <Input 
+                        placeholder="KEY (e.g. DATABASE_URL)" 
+                        value={envKey} 
+                        onChange={(e) => setEnvKey(e.target.value.toUpperCase().replace(/[^A-Z0-9_]/g, ''))}
+                        className="dark:bg-zinc-950"
+                      />
+                      <Input 
+                        placeholder="Value" 
+                        value={envValue} 
+                        onChange={(e) => setEnvValue(e.target.value)}
+                        type="password"
+                        className="dark:bg-zinc-950"
+                      />
+                    </div>
+                    <Button 
+                      type="button" 
+                      variant="secondary" 
+                      className="w-full gap-2" 
+                      onClick={handleAddEnv}
+                      disabled={addingEnv || !envKey || !envValue}
+                    >
+                      {addingEnv ? <Loader2 className="w-4 h-4 animate-spin" /> : <Plus className="w-4 h-4" />} Add Variable
+                    </Button>
+                  </div>
+                )}
+              </div>
+
+              <DialogFooter className="sm:justify-between flex-row items-center border-t dark:border-zinc-800 pt-4">
+                <p className="text-xs text-muted-foreground max-w-[200px]">
+                  AI ENV Guard will automatically scan your build logs if this fails.
+                </p>
+                <Button 
+                  onClick={handlePreflightCheck} 
+                  disabled={running || !needsEnv}
+                  className="gap-2 bg-indigo-600 hover:bg-indigo-700 text-white"
+                >
+                  {running ? (
+                    <><Loader2 className="w-4 h-4 animate-spin" /> Starting Build...</>
+                  ) : (
+                    <><Rocket className="w-4 h-4" /> Start Deployment</>
+                  )}
+                </Button>
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
           {deployment && getStatusBadge(deployment.status)}
         </div>
       </div>
@@ -439,6 +578,64 @@ export default function DeploymentLogsPage() {
         isOpen={showExplanation}
         onClose={() => setShowExplanation(false)}
       />
+
+      {/* AI Fixer Modal */}
+      <Dialog open={showFixModal} onOpenChange={setShowFixModal}>
+        <DialogContent className="sm:max-w-[500px]">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <FileCode2 className="h-5 w-5 text-indigo-500 dark:text-indigo-400" />
+              Fix Code with AI Agent
+            </DialogTitle>
+            <DialogDescription>
+              Our Autonomous AI Agent will analyze the error, rewrite the broken code, and run a test build. Choose how you want the AI to push the fix:
+            </DialogDescription>
+          </DialogHeader>
+          
+          <div className="py-4">
+            <RadioGroup value={fixStrategy} onValueChange={(val: any) => setFixStrategy(val)} className="space-y-4">
+              <div className="flex items-start space-x-3 rounded-lg border border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-900/50 p-4 transition-colors hover:border-indigo-500/50">
+                <RadioGroupItem value="direct_push" id="direct_push" className="mt-1" />
+                <div className="space-y-1">
+                  <Label htmlFor="direct_push" className="text-base font-medium cursor-pointer">
+                    Direct Push (Maximum Speed)
+                  </Label>
+                  <p className="text-sm text-zinc-500 dark:text-zinc-400">
+                    The AI will push the fix directly to your branch (<code className="text-xs text-indigo-600 dark:text-indigo-300">{deployment?.branch}</code>). Ideal for fast iterative fixes without jumping into GitHub.
+                  </p>
+                </div>
+              </div>
+              <div className="flex items-start space-x-3 rounded-lg border border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-900/50 p-4 transition-colors hover:border-indigo-500/50">
+                <RadioGroupItem value="pull_request" id="pull_request" className="mt-1" />
+                <div className="space-y-1">
+                  <Label htmlFor="pull_request" className="text-base font-medium cursor-pointer">
+                    Pull Request (Safe)
+                  </Label>
+                  <p className="text-sm text-zinc-500 dark:text-zinc-400">
+                    The AI will create a new branch and open a PR. You can review the code on GitHub before merging. 
+                  </p>
+                </div>
+              </div>
+            </RadioGroup>
+          </div>
+          
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setShowFixModal(false)} disabled={isStartingFix}>
+              Cancel
+            </Button>
+            <Button className="bg-indigo-600 hover:bg-indigo-700 text-white" onClick={handleStartAiFix} disabled={isStartingFix}>
+              {isStartingFix ? (
+                <>
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" /> Starting...
+                </>
+              ) : (
+                'Start AI Fix Loop'
+              )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
     </div>
   );
 }

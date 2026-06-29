@@ -36,7 +36,6 @@ export function AIFixAssistant({ deploymentId, projectId, onFixApplied }: AIFixA
     const [plan, setPlan] = useState<PatchPlan | null>(null);
     const [approved, setApproved] = useState(false);
     const [fixId, setFixId] = useState<string | null>(null);
-    const [diffText, setDiffText] = useState("");
     const [errorMsg, setErrorMsg] = useState("");
 
     const handlePreviewFix = async () => {
@@ -55,57 +54,6 @@ export function AIFixAssistant({ deploymentId, projectId, onFixApplied }: AIFixA
             }
 
             setPlan(data.plan);
-
-            // Generate full diff text from changes
-            // The backend 'preview' might strictly return 'PatchPlan' which has 'changes' list
-            // We can construct a simple diff for display if the backend didn't return pre-computed diffText in the PLAN object.
-            // Wait, my preview API returns { plan: PatchPlan }. PatchPlan has `changes`.
-            // My `applyPatchPlan` in backend generates diffText, but `suggestFix` does NOT?
-            // Ah, correct. `suggestFix` returns `PatchPlan`, which has `before`/`after` strings.
-            // We need to compute diff here OR rely on backend. 
-            // DiffViewer expects `diffText`. 
-            // Let's construct it locally for preview.
-
-            let computedDiff = "";
-            // Ideally reuse backend patch-engine computeDiff, but we are on client.
-            // Simple fallback or reuse logic.
-            if (data.plan.changes) {
-                data.plan.changes.forEach((c: any) => {
-                    computedDiff += `--- ${c.filePath}\n+++ ${c.filePath}\n`;
-                    // Naive visual diff construction if backend didn't provide it
-                    // Or just dump new file content? 
-                    // Let's iterate lines lightly.
-                    // Actually DiffViewer expects `diffText`. 
-                    // I'll make a specialized "preview" diff text that just shows:
-                    // - old line
-                    // + new line
-                    // for changed blocks only? 
-                    // For simplicity in MVP, let's just assume we show 'Whole File Replacement' style diff if 'before' is empty,
-                    // or try to show simple diff. 
-                    // Better: Update `preview` API to return `diffPreview` text so client doesn't guess.
-                    // Too late to change API without backtracking.
-                    // I'll implement a simple client-side diff generator or just show the 'after' content as added.
-
-                    if (!c.before) {
-                        c.after.split('\n').forEach((l: string) => computedDiff += `+ ${l}\n`);
-                    } else {
-                        // Very rough diff
-                        // We just list new content as + ???
-                        // No, that's bad.
-                        // Let's try to do a simple diff.
-                        // Or... wait. `applyPatchPlan` returns `diffText`.
-                        // `preview` API returns `plan`.
-                        // I should update `preview` API to possibly include `diffPreview`.
-                        // But User Rules: "Minimal changes".
-                        // I'll just do a very dumb diff:
-                        computedDiff += `\n(Diff generation on client is strictly visual approximation)\n\n`;
-                        computedDiff += `[OLD CONTENT]\n${c.before.substring(0, 200)}...\n\n[NEW CONTENT]\n${c.after.substring(0, 200)}...\n`;
-                    }
-                    computedDiff += `\n`;
-                });
-            }
-            setDiffText(computedDiff);
-
             setStep("review");
         } catch (err: any) {
             setErrorMsg(err.message);
@@ -253,8 +201,8 @@ export function AIFixAssistant({ deploymentId, projectId, onFixApplied }: AIFixA
                         </Alert>
                     ) : (
                         <>
-                            <div className="rounded-xl overflow-hidden shadow-sm border border-border/50">
-                                <DiffViewer diffText={diffText} />
+                            <div className="w-full">
+                                <DiffViewer changes={plan.changes} />
                             </div>
 
                             <div className="flex items-start space-x-3 p-5 bg-gradient-to-br from-gray-50 to-white dark:from-zinc-900 dark:to-zinc-900/50 rounded-xl border border-border/50 shadow-sm">

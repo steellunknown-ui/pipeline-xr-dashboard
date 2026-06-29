@@ -132,7 +132,7 @@ export async function analyzeFailure(
 
   // 1. Try AI analysis first (Nemotron 3 Super — 1M context window eats logs whole)
   try {
-    const recentLogs = logs.slice(-120).join("\n");
+    const recentLogs = logs.join("\n");
 
     const content = await analyzeAI(
       [

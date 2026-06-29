@@ -12,6 +12,7 @@ export async function createDeployment(formData: {
   environment: string;
   branch: string;
   source?: string;
+  scheduledFor?: string;
 }) {
   try {
     const supabase = await getSupabaseServer();
@@ -63,6 +64,9 @@ export async function createDeployment(formData: {
     // Compute deployment footprint 
     const envFingerprint = deriveEnvFingerprint(envVars || []);
 
+    const isScheduled = formData.scheduledFor && new Date(formData.scheduledFor).getTime() > Date.now();
+    const initialStatus = isScheduled ? "scheduled" : "pending";
+
     // Create deployment record
     const { data: deployment, error } = await supabase
       .from("deployments")
@@ -70,10 +74,12 @@ export async function createDeployment(formData: {
         project_id: formData.projectId,
         environment: formData.environment,
         branch: formData.branch,
-        status: "pending",
+        status: initialStatus,
         user_id: user.id,
         source: sourceResult.source,
-        env_fingerprint: envFingerprint
+        env_fingerprint: envFingerprint,
+        started_at: isScheduled ? null : new Date().toISOString(),
+        scheduled_for: isScheduled ? formData.scheduledFor : null,
       })
       .select()
       .single();
@@ -86,9 +92,22 @@ export async function createDeployment(formData: {
     await supabase.from("deployment_logs").insert({
       deployment_id: deployment.id,
       user_id: user.id,
-      message: "📋 Deployment queued",
+      message: isScheduled 
+        ? `🕒 Deployment scheduled for ${new Date(formData.scheduledFor!).toLocaleString()}` 
+        : "📋 Deployment queued",
       level: "info"
     });
+
+    if (isScheduled) {
+      await createActivityLog({
+        event: "deployment_scheduled",
+        user_id: user.id,
+        description: `Scheduled deployment for ${project.name}`,
+        project_id: formData.projectId,
+        metadata: { deploymentId: deployment.id, scheduledFor: formData.scheduledFor },
+      });
+      return { success: true, data: deployment };
+    }
 
     // Start simulated deployment engine
     const projectSlug = project.name.toLowerCase().replace(/[^a-z0-9]/g, '-');
@@ -116,7 +135,8 @@ export async function createDeployment(formData: {
 export async function triggerVercelDeploy(formData: {
   projectId: string;
   environment: string;
-  branch: string;
+  branch?: string;
+  scheduledFor?: string;
 }) {
   try {
     const supabase = await getSupabaseServer();
@@ -165,18 +185,22 @@ export async function triggerVercelDeploy(formData: {
 
     const envFingerprint = deriveEnvFingerprint(envVars || []);
 
+    const isScheduled = formData.scheduledFor && new Date(formData.scheduledFor).getTime() > Date.now();
+    const initialStatus = isScheduled ? "scheduled" : "pending";
+
     // Create deployment record in DB
     const { data: deployment, error: deploymentError } = await supabase
       .from("deployments")
       .insert({
         project_id: formData.projectId,
         environment: formData.environment,
-        branch: formData.branch,
-        status: "pending",
+        branch: formData.branch || project.auto_deploy_branch || 'main',
+        status: initialStatus,
         user_id: user.id,
-        source: "github",
+        source: project.project_type === "STATIC" && !project.github_repo_url ? "zip" : "github",
         env_fingerprint: envFingerprint,
-        started_at: new Date().toISOString(),
+        started_at: isScheduled ? null : new Date().toISOString(),
+        scheduled_for: isScheduled ? formData.scheduledFor : null,
       })
       .select()
       .single();
@@ -189,120 +213,29 @@ export async function triggerVercelDeploy(formData: {
     await supabase.from("deployment_logs").insert({
       deployment_id: deployment.id,
       user_id: user.id,
-      message: "📋 Deployment queued — contacting Vercel...",
+      message: isScheduled 
+        ? `🕒 Deployment scheduled for ${new Date(formData.scheduledFor!).toLocaleString()}` 
+        : "📋 Deployment queued — contacting Vercel...",
       level: "info",
     });
 
-    // ─── Vercel API Setup ───────────────────────────────────────────
-    const vercelToken = process.env.VERCEL_API_TOKEN;
-    const teamId = process.env.VERCEL_TEAM_ID;
-
-    if (!vercelToken) {
-      await supabase.from("deployments").update({ status: "failed", error_message: "Vercel API token not configured." }).eq("id", deployment.id);
-      return { success: false, error: "Vercel API token not configured." };
+    if (isScheduled) {
+      await createActivityLog({
+        event: "deployment_scheduled",
+        user_id: user.id,
+        description: `Scheduled deployment for ${project.name}`,
+        project_id: formData.projectId,
+        metadata: { deploymentId: deployment.id, scheduledFor: formData.scheduledFor },
+      });
+      return { success: true, data: deployment };
     }
 
-    const vercelHeaders = {
-      Authorization: `Bearer ${vercelToken}`,
-      "Content-Type": "application/json",
-    };
-
-    const queryParams = new URLSearchParams();
-    if (teamId) queryParams.append("teamId", teamId);
-    queryParams.append("skipAutoDetectionConfirmation", "1");
-    const queryString = `?${queryParams.toString()}`;
-
-    // ─── Get GitHub token (needed for private repos) ─────────────────
-    const { data: { session } } = await supabase.auth.getSession();
-    const githubToken = session?.provider_token;
-
-    // ─── Extract owner/repo from URL ─────────────────────────────────
-    const repoMatch = project.github_repo_url.match(/github\.com\/([^\/]+)\/([^\/]+?)(?:\.git)?$/);
-    if (!repoMatch) {
-      await supabase.from("deployments").update({ status: "failed", error_message: "Invalid GitHub repo URL." }).eq("id", deployment.id);
-      return { success: false, error: "Invalid GitHub repository URL format." };
-    }
-    const [, owner, repo] = repoMatch;
-
-    // ─── Get GitHub repo ID ───────────────────────────────────────────
-    const ghFetchHeaders: Record<string, string> = {
-      Accept: "application/vnd.github.v3+json",
-    };
-    if (githubToken) {
-      ghFetchHeaders["Authorization"] = `token ${githubToken}`;
-    }
-
-    const ghRes = await fetch(`https://api.github.com/repos/${owner}/${repo}`, {
-      headers: ghFetchHeaders,
-    });
-
-    if (!ghRes.ok) {
-      const ghErr = await ghRes.json().catch(() => ({}));
-      const msg = ghRes.status === 404
-        ? `GitHub repo "${owner}/${repo}" not found. Check the repo is connected and your GitHub session is fresh.`
-        : `GitHub API error (${ghRes.status}): ${ghErr.message || ghRes.statusText}`;
-      await supabase.from("deployments").update({ status: "failed", error_message: msg }).eq("id", deployment.id);
-      await supabase.from("deployment_logs").insert({ deployment_id: deployment.id, user_id: user.id, message: `❌ ${msg}`, level: "error" });
-      return { success: false, error: msg };
-    }
-
-    const ghData = await ghRes.json();
-    const repoId = String(ghData.id);
-
-    await supabase.from("deployment_logs").insert({
-      deployment_id: deployment.id,
-      user_id: user.id,
-      message: `🔗 GitHub repo confirmed: ${owner}/${repo} (ID: ${repoId})`,
-      level: "info",
-    });
-
-    // ─── Build Vercel project name (slug) ────────────────────────────
+    // ─── Trigger Vercel Deployment via Background Engine ────────────────
     const projectSlug = project.name.toLowerCase().replace(/[^a-z0-9-]/g, "-").replace(/-+/g, "-").replace(/^-|-$/g, "");
-
-    // ─── Trigger Vercel Deployment ────────────────────────────────────
-    const vercelRes = await fetch(`https://api.vercel.com/v13/deployments${queryString}`, {
-      method: "POST",
-      headers: vercelHeaders,
-      body: JSON.stringify({
-        name: projectSlug,
-        gitSource: {
-          type: "github",
-          ref: formData.branch,
-          repoId,
-        },
-        target: formData.environment === "production" ? "production" : undefined,
-      }),
-    });
-
-    const vercelData = await vercelRes.json();
-
-    if (!vercelRes.ok) {
-      const errMsg = vercelData.error?.message || vercelData.message || "Unknown Vercel error";
-      await supabase.from("deployments").update({ status: "failed", error_message: errMsg, completed_at: new Date().toISOString() }).eq("id", deployment.id);
-      await supabase.from("deployment_logs").insert({ deployment_id: deployment.id, user_id: user.id, message: `❌ Vercel error: ${errMsg}`, level: "error" });
-      return { success: false, error: `Vercel Error: ${errMsg}` };
-    }
-
-    // ─── Save Vercel IDs back to DB ───────────────────────────────────
-    await supabase
-      .from("deployments")
-      .update({ vercel_deployment_id: vercelData.id, status: "building" })
-      .eq("id", deployment.id);
-
-    // Save vercel_project_id to project if we got one
-    if (vercelData.projectId && !project.vercel_project_id) {
-      await supabase
-        .from("projects")
-        .update({ vercel_project_id: vercelData.projectId })
-        .eq("id", project.id);
-    }
-
-    await supabase.from("deployment_logs").insert({
-      deployment_id: deployment.id,
-      user_id: user.id,
-      message: `🚀 Deployment started on Vercel! ID: ${vercelData.id}`,
-      level: "info",
-    });
+    
+    // Fire and forget - background engine handles the rest (Git Clone -> Inject ENVs -> Spawn Vercel Deploy -> Stream Logs)
+    const { DeploymentEngine } = await import('@/lib/deployment-engine');
+    DeploymentEngine.startDeployment(deployment.id, projectSlug).catch(console.error);
 
     await createActivityLog({
       event: "deployment_created",
@@ -311,18 +244,17 @@ export async function triggerVercelDeploy(formData: {
       project_id: formData.projectId,
       metadata: {
         deploymentId: deployment.id,
-        vercelDeploymentId: vercelData.id,
         environment: formData.environment,
-        branch: formData.branch,
+        branch: formData.branch
       },
     });
 
     return { success: true, data: deployment };
-  } catch (error: any) {
-    return { success: false, error: error.message || "Failed to trigger Vercel deployment" };
+  } catch (error) {
+    console.error("Vercel Deploy Error:", error);
+    return { success: false, error: "Failed to trigger Vercel deployment" };
   }
 }
-
 
 
 

@@ -8,11 +8,13 @@ export type Project = {
   webhook_secret: string | null;
   created_at: string;
   updated_at: string;
+  production_alias_url?: string | null;
   envState?: {
     status: "NOT_REQUIRED" | "REQUIRED_MISSING" | "CONFIGURED";
     reason: string;
     envCount: number;
   };
+  source_type?: "github" | "zip" | "manual" | string;
 };
 
 export type Deployment = {
@@ -26,6 +28,11 @@ export type Deployment = {
   source?: "github" | "zip" | "manual";
   deployment_url?: string | null;
   vercel_deployment_id?: string | null;
+  alias_url?: string | null;
+  alias_status?: "pending" | "assigned" | "failed";
+  preview_image_url?: string | null;
+  ai_fix_attempts?: number | null;
+  ai_fix_status?: string | null;
   status: "pending" | "building" | "success" | "failed" | "cancelled";
   created_at: string;
   env_fingerprint?: string | null;

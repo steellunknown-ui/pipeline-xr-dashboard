@@ -8,16 +8,21 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Card } from "@/components/ui/card";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
-import { Plus, Eye, EyeOff, Copy, Pencil, Trash2, Mail } from "lucide-react";
-import { addEnvVariable, getEnvVariables, deleteEnvVariable, updateEnvVariable } from "../actions";
+import { Plus, Eye, EyeOff, Copy, Pencil, Trash2, Mail, Lock, Upload } from "lucide-react";
+import { addEnvVariable, getEnvVariables, deleteEnvVariable, updateEnvVariable, bulkAddEnvVariables } from "@/app/dashboard/actions/environment";
+import { useRef } from "react";
 import { supabase } from "@/lib/supabase-browser";
 import { toast } from "sonner";
 import type { EnvironmentVariable } from "@/lib/types/database";
 import { GradientBar } from "@/components/ui/gradient-bar";
 
-export default function EnvironmentPage() {
+interface EnvironmentVariablesPanelProps {
+  projectId: string;
+}
+
+export function EnvironmentVariablesPanel({ projectId }: EnvironmentVariablesPanelProps) {
   const [variables, setVariables] = useState<EnvironmentVariable[]>([]);
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState<"production" | "staging" | "development">("production");
@@ -28,11 +33,11 @@ export default function EnvironmentPage() {
   const [revealedValues, setRevealedValues] = useState<Record<string, string>>({});
   const [revealTimers, setRevealTimers] = useState<Record<string, NodeJS.Timeout>>({});
   const [selectedVariable, setSelectedVariable] = useState<EnvironmentVariable | null>(null);
-  const [formData, setFormData] = useState({ key: "", value: "", environment: "production" as "development" | "staging" | "production" });
+  const [formData, setFormData] = useState({ key: "", value: "", environment: "production" as "development" | "staging" | "production", project_id: projectId });
   const [otpCode, setOtpCode] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [userEmail, setUserEmail] = useState<string>("");
-  
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     fetchVariables();
@@ -40,7 +45,7 @@ export default function EnvironmentPage() {
     return () => {
       Object.values(revealTimers).forEach(timer => clearTimeout(timer));
     };
-  }, []);
+  }, [projectId]);
 
   async function fetchUserEmail() {
     const { data: { user } } = await supabase.auth.getUser();
@@ -51,7 +56,7 @@ export default function EnvironmentPage() {
 
   async function fetchVariables() {
     setLoading(true);
-    const result = await getEnvVariables();
+    const result = await getEnvVariables(projectId);
     if (result.success) {
       setVariables(result.data || []);
     } else {
@@ -66,11 +71,11 @@ export default function EnvironmentPage() {
       return;
     }
     setSubmitting(true);
-    const result = await addEnvVariable(formData);
+    const result = await addEnvVariable({ ...formData, project_id: projectId });
     if (result.success) {
       toast.success("Variable added successfully");
       setAddModalOpen(false);
-      setFormData({ key: "", value: "", environment: "production" });
+      setFormData({ key: "", value: "", environment: activeTab, project_id: projectId });
       fetchVariables();
     } else {
       toast.error(result.error || "Failed to add variable");
@@ -185,9 +190,54 @@ export default function EnvironmentPage() {
     toast.success(`${type} copied to clipboard`);
   }
 
+  async function handleFileUpload(event: React.ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    
+    setSubmitting(true);
+    try {
+      const text = await file.text();
+      const lines = text.split('\n');
+      const variablesToInsert: any[] = [];
+      
+      for (const line of lines) {
+        const trimmed = line.trim();
+        if (!trimmed || trimmed.startsWith('#')) continue;
+        
+        const match = trimmed.match(/^([^=]+)=(.*)$/);
+        if (match) {
+          const key = match[1].trim();
+          let value = match[2].trim();
+          if ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'"))) {
+             value = value.substring(1, value.length - 1);
+          }
+          variablesToInsert.push({ key, value, environment: activeTab, project_id: projectId });
+        }
+      }
+
+      if (variablesToInsert.length > 0) {
+        const result = await bulkAddEnvVariables(variablesToInsert);
+        if (result.success) {
+          toast.success(`Successfully imported ${variablesToInsert.length} variables!`);
+          fetchVariables();
+        } else {
+          toast.error(result.error || "Failed to import variables");
+        }
+      } else {
+         toast.info("No valid variables found in the file.");
+      }
+    } catch (e) {
+      toast.error("Error reading file.");
+    } finally {
+      setSubmitting(false);
+      // Reset input
+      if (fileInputRef.current) fileInputRef.current.value = "";
+    }
+  }
+
   function openEditModal(variable: EnvironmentVariable) {
     setSelectedVariable(variable);
-    setFormData({ key: variable.key, value: variable.value, environment: variable.environment });
+    setFormData({ key: variable.key, value: variable.value, environment: variable.environment, project_id: projectId });
     setEditModalOpen(true);
   }
 
@@ -199,57 +249,80 @@ export default function EnvironmentPage() {
   const filteredVariables = variables.filter(v => v.environment === activeTab);
 
   return (
-    <div className="space-y-6">
-      <GradientBar />
-      <div className="flex items-center justify-between">
+    <Card className="w-full">
+      <CardHeader className="flex flex-row items-center justify-between pb-4">
         <div>
-          <h1 className="text-3xl font-bold">Environment Variables</h1>
-          <p className="text-muted-foreground mt-1">Manage environment-specific configuration values</p>
+          <CardTitle className="flex items-center gap-2">
+            <Lock className="w-5 h-5" /> Environment Variables
+          </CardTitle>
+          <CardDescription>
+            Manage secure configuration values for your deployments. ZIP uploads automatically populate this table.
+          </CardDescription>
         </div>
-        <Button onClick={() => { setFormData({ key: "", value: "", environment: activeTab }); setAddModalOpen(true); }}>
-          <Plus className="mr-2 h-4 w-4" />
-          Add Variable
-        </Button>
-      </div>
+        <div className="flex gap-2">
+          <input 
+             type="file" 
+             accept=".env,text/plain" 
+             className="hidden" 
+             ref={fileInputRef} 
+             onChange={handleFileUpload} 
+          />
+          <Button variant="outline" disabled={submitting} onClick={() => fileInputRef.current?.click()}>
+            <Upload className="mr-2 h-4 w-4" />
+            Upload .env
+          </Button>
+          <Button disabled={submitting} onClick={() => { setFormData({ key: "", value: "", environment: activeTab, project_id: projectId }); setAddModalOpen(true); }}>
+            <Plus className="mr-2 h-4 w-4" />
+            Add Variable
+          </Button>
+        </div>
+      </CardHeader>
+      
+      <CardContent>
+        <Tabs value={activeTab} onValueChange={(v: any) => setActiveTab(v)} className="w-full">
+          <TabsList className="grid w-full max-w-md grid-cols-3 mb-6">
+            <TabsTrigger value="production">Production</TabsTrigger>
+            <TabsTrigger value="staging">Staging</TabsTrigger>
+            <TabsTrigger value="development">Development</TabsTrigger>
+          </TabsList>
 
-      <Tabs value={activeTab} onValueChange={(v: any) => setActiveTab(v)} className="w-full">
-        <TabsList className="grid w-full max-w-md grid-cols-3">
-          <TabsTrigger value="production">Production</TabsTrigger>
-          <TabsTrigger value="staging">Staging</TabsTrigger>
-          <TabsTrigger value="development">Development</TabsTrigger>
-        </TabsList>
-
-        {["production", "staging", "development"].map((env) => (
-          <TabsContent key={env} value={env} className="space-y-4">
-            {loading ? (
-              <div className="space-y-2">
-                {Array.from({ length: 3 }).map((_, i) => <Skeleton key={i} className="h-16 w-full" />)}
-              </div>
-            ) : filteredVariables.length === 0 ? (
-              <Card className="p-8 text-center">
-                <p className="text-muted-foreground">No variables in {env} environment</p>
-                <Button variant="link" onClick={() => { setFormData({ key: "", value: "", environment: env as any }); setAddModalOpen(true); }}>
-                  Add your first variable
-                </Button>
-              </Card>
-            ) : (
-              <div className="space-y-2">
-                {filteredVariables.map((variable) => (
-                  <Card key={variable.id} className="p-4 hover:shadow-md transition-shadow">
-                    <div className="flex items-center justify-between gap-4">
+          {["production", "staging", "development"].map((env) => (
+            <TabsContent key={env} value={env} className="space-y-4">
+              {loading ? (
+                <div className="space-y-2">
+                  {Array.from({ length: 3 }).map((_, i) => <Skeleton key={i} className="h-16 w-full" />)}
+                </div>
+              ) : filteredVariables.length === 0 ? (
+                <div className="p-8 text-center border rounded-lg border-dashed">
+                  <p className="text-muted-foreground mb-4">No variables in {env} environment</p>
+                  <div className="flex justify-center gap-3">
+                    <Button variant="outline" onClick={() => fileInputRef.current?.click()}>
+                      <Upload className="mr-2 h-4 w-4" />
+                      Upload .env
+                    </Button>
+                    <Button onClick={() => { setFormData({ key: "", value: "", environment: env as any, project_id: projectId }); setAddModalOpen(true); }}>
+                      <Plus className="mr-2 h-4 w-4" />
+                      Add your first variable
+                    </Button>
+                  </div>
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  {filteredVariables.map((variable) => (
+                    <div key={variable.id} className="flex items-center justify-between gap-4 p-4 border rounded-lg hover:border-zinc-500 transition-colors bg-zinc-950/50">
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center gap-2">
                           <p className="font-mono font-semibold text-sm">{variable.key}</p>
-                          <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => copyToClipboard(variable.key, "Key")}>
+                          <Button variant="ghost" size="icon" className="h-6 w-6 text-zinc-500 hover:text-white" onClick={() => copyToClipboard(variable.key, "Key")}>
                             <Copy className="h-3 w-3" />
                           </Button>
                         </div>
                         <div className="flex items-center gap-2 mt-1">
-                          <p className="font-mono text-sm text-muted-foreground">
-                            {revealedValues[variable.id] || "••••••••••••••••"}
+                          <p className="font-mono text-sm text-zinc-400">
+                            {revealedValues[variable.id] || "••••••••••••••••••••"}
                           </p>
                           {revealedValues[variable.id] && (
-                            <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => copyToClipboard(variable.value, "Value")}>
+                            <Button variant="ghost" size="icon" className="h-6 w-6 text-zinc-500 hover:text-white" onClick={() => copyToClipboard(variable.value, "Value")}>
                               <Copy className="h-3 w-3" />
                             </Button>
                           )}
@@ -259,6 +332,7 @@ export default function EnvironmentPage() {
                         <Button
                           variant="ghost"
                           size="icon"
+                          className="text-zinc-400 hover:text-white"
                           onClick={() => {
                             if (revealedValues[variable.id]) {
                               const newRevealed = { ...revealedValues };
@@ -271,21 +345,21 @@ export default function EnvironmentPage() {
                         >
                           {revealedValues[variable.id] ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
                         </Button>
-                        <Button variant="ghost" size="icon" onClick={() => openEditModal(variable)}>
+                        <Button variant="ghost" size="icon" className="text-zinc-400 hover:text-white" onClick={() => openEditModal(variable)}>
                           <Pencil className="h-4 w-4" />
                         </Button>
-                        <Button variant="ghost" size="icon" onClick={() => openDeleteDialog(variable)}>
-                          <Trash2 className="h-4 w-4 text-destructive" />
+                        <Button variant="ghost" size="icon" className="text-zinc-400 hover:text-red-500" onClick={() => openDeleteDialog(variable)}>
+                          <Trash2 className="h-4 w-4" />
                         </Button>
                       </div>
                     </div>
-                  </Card>
-                ))}
-              </div>
-            )}
-          </TabsContent>
-        ))}
-      </Tabs>
+                  ))}
+                </div>
+              )}
+            </TabsContent>
+          ))}
+        </Tabs>
+      </CardContent>
 
       {/* Add Variable Modal */}
       <Dialog open={addModalOpen} onOpenChange={setAddModalOpen}>
@@ -297,11 +371,11 @@ export default function EnvironmentPage() {
           <div className="space-y-4 py-4">
             <div className="space-y-2">
               <Label htmlFor="add-key">Key</Label>
-              <Input id="add-key" placeholder="API_KEY" value={formData.key} onChange={(e) => setFormData({ ...formData, key: e.target.value })} />
+              <Input id="add-key" placeholder="API_KEY" className="font-mono" value={formData.key} onChange={(e) => setFormData({ ...formData, key: e.target.value })} />
             </div>
             <div className="space-y-2">
               <Label htmlFor="add-value">Value</Label>
-              <Input id="add-value" type="password" placeholder="Enter value" value={formData.value} onChange={(e) => setFormData({ ...formData, value: e.target.value })} />
+              <Input id="add-value" type="password" placeholder="Enter value" className="font-mono" value={formData.value} onChange={(e) => setFormData({ ...formData, value: e.target.value })} />
             </div>
             <div className="space-y-2">
               <Label htmlFor="add-env">Environment</Label>
@@ -334,11 +408,11 @@ export default function EnvironmentPage() {
           <div className="space-y-4 py-4">
             <div className="space-y-2">
               <Label htmlFor="edit-key">Key</Label>
-              <Input id="edit-key" placeholder="API_KEY" value={formData.key} onChange={(e) => setFormData({ ...formData, key: e.target.value })} />
+              <Input id="edit-key" placeholder="API_KEY" className="font-mono" value={formData.key} onChange={(e) => setFormData({ ...formData, key: e.target.value })} />
             </div>
             <div className="space-y-2">
               <Label htmlFor="edit-value">Value</Label>
-              <Input id="edit-value" type="password" placeholder="Enter value" value={formData.value} onChange={(e) => setFormData({ ...formData, value: e.target.value })} />
+              <Input id="edit-value" type="password" placeholder="Enter value" className="font-mono" value={formData.value} onChange={(e) => setFormData({ ...formData, value: e.target.value })} />
             </div>
           </div>
           <DialogFooter>
@@ -401,7 +475,6 @@ export default function EnvironmentPage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
-    </div>
+    </Card>
   );
 }
-

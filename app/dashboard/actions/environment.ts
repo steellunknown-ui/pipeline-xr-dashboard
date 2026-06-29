@@ -59,6 +59,52 @@ export async function addEnvVariable(formData: {
   }
 }
 
+export async function bulkAddEnvVariables(variables: {
+  key: string;
+  value: string;
+  environment: "development" | "staging" | "production";
+  project_id?: string;
+}[]) {
+  try {
+    const supabase = await getSupabaseServer();
+    const { data: { user }, error: authError } = await supabase.auth.getUser();
+    
+    if (authError || !user) {
+      return { success: false, error: "Unauthorized" };
+    }
+
+    const payload = variables.map(v => ({
+      key: v.key,
+      value: v.value,
+      environment: v.environment,
+      project_id: v.project_id,
+      user_id: user.id
+    }));
+
+    // Perform upsert based on unique constraint if exists, otherwise insert
+    // Since we don't have a unique constraint on (project_id, key, environment), we'll do sequential checks or just insert
+    // For simplicity and speed in this prototype, we'll just insert
+    const { error } = await supabase
+      .from("environment_variables")
+      .insert(payload);
+
+    if (error) {
+      return { success: false, error: error.message };
+    }
+
+    await createActivityLog({
+      event: "env_variable_bulk_added",
+      user_id: user.id,
+      description: `Bulk added ${variables.length} environment variables`,
+      project_id: variables[0]?.project_id,
+    });
+
+    return { success: true };
+  } catch (error) {
+    return { success: false, error: "Failed to bulk add environment variables" };
+  }
+}
+
 export async function getEnvVariables(projectId?: string) {
   try {
     const supabase = await getSupabaseServer();

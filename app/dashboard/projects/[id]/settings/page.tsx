@@ -143,6 +143,7 @@ export default function ProjectSettingsPage() {
   const [project, setProject] = useState<Project | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [fixingUrls, setFixingUrls] = useState(false);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [connectingGitHub, setConnectingGitHub] = useState(false);
   const [githubRepos, setGithubRepos] = useState<GitHubRepo[]>([]);
@@ -629,6 +630,48 @@ export default function ProjectSettingsPage() {
 
 
 
+      {/* Maintenance Zone */}
+      <Card>
+        <CardHeader>
+          <CardTitle>Maintenance</CardTitle>
+          <CardDescription>System utilities and synchronization</CardDescription>
+        </CardHeader>
+        <CardContent>
+          <div className="flex items-center justify-between p-4 border rounded-lg">
+            <div>
+              <p className="font-medium">Fix Production URLs</p>
+              <p className="text-sm text-muted-foreground">
+                Backfill missing production alias URLs and screenshots for older deployments.
+              </p>
+            </div>
+            <Button 
+              variant="outline" 
+              disabled={fixingUrls}
+              onClick={async () => {
+                setFixingUrls(true);
+                toast.loading("Running URL backfill...", { id: "backfill-toast" });
+                try {
+                  const res = await fetch("/api/fix-alias-urls", { method: "POST" });
+                  const data = await res.json();
+                  if (res.ok) {
+                    toast.success(`Fixed ${data.fixed} deployments · Failed ${data.failed}`, { id: "backfill-toast" });
+                  } else {
+                    toast.error(data.error || "Failed to backfill URLs", { id: "backfill-toast" });
+                  }
+                } catch (e) {
+                  toast.error("Network error during backfill", { id: "backfill-toast" });
+                } finally {
+                  setFixingUrls(false);
+                }
+              }}
+            >
+              <RefreshCw className={`h-4 w-4 mr-2 ${fixingUrls ? 'animate-spin' : ''}`} />
+              Fix URLs
+            </Button>
+          </div>
+        </CardContent>
+      </Card>
+
       {/* Danger Zone */}
       <Card className="border-destructive">
         <CardHeader>
@@ -659,11 +702,11 @@ export default function ProjectSettingsPage() {
             <AlertDialogDescription>
               This action cannot be undone. This will permanently delete the project{" "}
               <span className="font-semibold">{project.name}</span> and all associated data including:
-              <ul className="list-disc list-inside mt-2 space-y-1">
-                <li>All deployments</li>
-                <li>All environment variables</li>
-                <li>All activity logs</li>
-              </ul>
+              <span className="block mt-2 space-y-1">
+                <span className="block">• All deployments</span>
+                <span className="block">• All environment variables</span>
+                <span className="block">• All activity logs</span>
+              </span>
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
