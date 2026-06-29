@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import Image from "next/image";
 import { supabase } from "@/lib/supabase-browser";
 import { Sidebar } from "@/components/layout/sidebar";
 import { Topbar } from "@/components/layout/topbar";
@@ -65,8 +66,8 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
     return (
       <div className="flex h-screen items-center justify-center bg-background">
         <div className="flex flex-col items-center gap-4">
-          <div className="h-9 w-9 rounded-lg bg-gradient-to-br from-violet-600 to-indigo-600 flex items-center justify-center animate-pulse">
-            <span className="text-white font-bold text-sm">PX</span>
+          <div className="h-16 w-16 flex items-center justify-center animate-pulse mix-blend-screen overflow-hidden">
+            <Image src="/images/xr-logo.png" alt="Pipeline XR Logo" width={64} height={64} className="object-contain" />
           </div>
           <p className="text-sm text-muted-foreground">Loading Pipeline XR...</p>
         </div>

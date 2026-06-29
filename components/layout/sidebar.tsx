@@ -1,6 +1,6 @@
 "use client";
-
 import Link from "next/link";
+import Image from "next/image";
 import { usePathname } from "next/navigation";
 import { cn } from "@/lib/utils";
 import {
@@ -98,8 +98,8 @@ export function Sidebar() {
       >
         {/* Logo */}
         <div className="flex h-16 items-center gap-3 px-5 border-b border-border">
-          <div className="h-8 w-8 rounded-md border-2 border-foreground flex items-center justify-center flex-shrink-0">
-            <span className="text-foreground font-black text-xs tracking-tighter">XR</span>
+          <div className="h-8 w-8 flex items-center justify-center flex-shrink-0 bg-transparent mix-blend-screen overflow-hidden">
+            <Image src="/images/xr-logo.png" alt="XR Logo" width={32} height={32} className="object-contain" />
           </div>
           <span className="text-base font-bold tracking-tight">Pipeline XR</span>
         </div>
@@ -129,8 +129,8 @@ export function Sidebar() {
       >
         {/* Logo */}
         <div className="flex h-16 items-center border-b border-border px-[18px] flex-shrink-0">
-          <div className="h-8 w-8 rounded-md border-2 border-foreground flex items-center justify-center flex-shrink-0">
-            <span className="text-foreground font-black text-xs tracking-tighter">XR</span>
+          <div className="h-8 w-8 flex items-center justify-center flex-shrink-0 bg-transparent mix-blend-screen overflow-hidden">
+            <Image src="/images/xr-logo.png" alt="XR Logo" width={32} height={32} className="object-contain" />
           </div>
           {expanded && (
             <span className="ml-3 text-base font-bold tracking-tight whitespace-nowrap">Pipeline XR</span>

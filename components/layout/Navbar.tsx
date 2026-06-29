@@ -115,11 +115,9 @@ export const Navbar = () => {
       <div className="mx-auto flex max-w-7xl items-center justify-between px-6 py-4">
         <Link 
           href="/" 
-          className={`text-xl font-bold transition-colors duration-300 ${
-            lightMode ? "text-black" : "text-white"
-          }`}
+          className="transition-colors duration-300 mix-blend-screen"
         >
-          Pipeline XR
+          <Image src="/images/logo-full.png" alt="Pipeline XR" width={180} height={40} className="object-contain h-8 w-auto" />
         </Link>
 
         <div className="flex items-center gap-8">
