@@ -96,6 +96,9 @@ export function GitHubRepoSelector() {
 
   const connectGitHub = async () => {
     try {
+      // Client-side cookie is bulletproof for the callback route to read
+      document.cookie = "github_return_url=/dashboard/projects/github; path=/; max-age=300; SameSite=Lax";
+
       // Call our GitHub OAuth API route
       const response = await fetch('/api/github/oauth', {
         method: 'POST',

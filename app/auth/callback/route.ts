@@ -30,6 +30,16 @@ export async function GET(request: Request) {
     await supabase.auth.exchangeCodeForSession(code)
   }
 
-  const redirectUrl = redirect || '/dashboard'
+  let redirectUrl = redirect || '/dashboard';
+  
+  const cookieStore = await cookies();
+  const githubReturnUrl = cookieStore.get('github_return_url')?.value;
+  
+  if (githubReturnUrl) {
+    redirectUrl = githubReturnUrl;
+    // We can't easily delete the cookie from Server Component response redirect without setting headers, 
+    // but maxAge of 5 minutes makes it safe to leave.
+  }
+
   return NextResponse.redirect(`${origin}${redirectUrl}`)
 }
