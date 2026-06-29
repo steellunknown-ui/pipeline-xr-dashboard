@@ -129,7 +129,7 @@ async function insertLogIfNew(deploymentId: string, userId: string, message: str
 
 export async function runZipDeployment(projectId: string, filePath: string, userId: string, environment: string) {
   try {
-    const vercelToken = process.env.VERCEL_API_TOKEN;
+    const vercelToken = process.env.PIPELINE_VERCEL_TOKEN;
     const teamId = process.env.VERCEL_TEAM_ID;
 
     if (!vercelToken) {

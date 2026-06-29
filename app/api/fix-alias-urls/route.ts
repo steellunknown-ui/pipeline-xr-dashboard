@@ -13,7 +13,7 @@ export async function POST(req: Request) {
     }
 
     const { data: { session } } = await supabase.auth.getSession();
-    const vercelToken = process.env.VERCEL_API_TOKEN;
+    const vercelToken = process.env.PIPELINE_VERCEL_TOKEN;
     if (!vercelToken) {
       return NextResponse.json({ error: "Vercel API token missing" }, { status: 500 });
     }

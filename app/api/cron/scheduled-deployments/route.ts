@@ -32,7 +32,7 @@ export async function GET(request: Request) {
       return NextResponse.json({ message: "No scheduled deployments due." });
     }
 
-    const vercelToken = process.env.VERCEL_API_TOKEN;
+    const vercelToken = process.env.PIPELINE_VERCEL_TOKEN;
     const teamId = process.env.VERCEL_TEAM_ID;
     
     let processedCount = 0;

@@ -278,8 +278,8 @@ export class DeploymentEngine {
 
       await log(`⚙️ Setting up Vercel CLI environment...`);
       
-      const vercelToken = process.env.VERCEL_API_TOKEN;
-      if (!vercelToken) throw new Error("VERCEL_API_TOKEN is not set.");
+      const vercelToken = process.env.PIPELINE_VERCEL_TOKEN;
+      if (!vercelToken) throw new Error("PIPELINE_VERCEL_TOKEN is not set.");
       
       const teamIdStr = process.env.VERCEL_TEAM_ID ? `--scope ${process.env.VERCEL_TEAM_ID}` : "";
 
@@ -385,8 +385,8 @@ export class DeploymentEngine {
       await log(`⚙️ Preparing environment variables...`);
       const { data: envVars } = await supabase.from('environment_variables').select('key, value').eq('project_id', projectId);
       
-      const vercelToken = process.env.VERCEL_API_TOKEN;
-      if (!vercelToken) throw new Error("VERCEL_API_TOKEN is not set.");
+      const vercelToken = process.env.PIPELINE_VERCEL_TOKEN;
+      if (!vercelToken) throw new Error("PIPELINE_VERCEL_TOKEN is not set.");
       const teamIdStr = process.env.VERCEL_TEAM_ID ? `?teamId=${process.env.VERCEL_TEAM_ID}` : '';
       
       let envArgs: string[] = [];

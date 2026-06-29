@@ -327,7 +327,7 @@ export async function createProjectFromGitHub(data: {
     });
 
     // Try to fetch existing Vercel project and alias
-    const vercelToken = process.env.VERCEL_API_TOKEN;
+    const vercelToken = process.env.PIPELINE_VERCEL_TOKEN;
     if (vercelToken) {
       try {
         const teamIdStr = process.env.VERCEL_TEAM_ID ? `?teamId=${process.env.VERCEL_TEAM_ID}` : '';

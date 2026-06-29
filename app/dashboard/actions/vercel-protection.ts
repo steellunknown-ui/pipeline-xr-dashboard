@@ -5,9 +5,9 @@ import { getSupabaseServer } from "@/lib/supabase-server";
 export async function disableDeploymentProtection(vercelProjectId: string) {
   try {
     const supabase = await getSupabaseServer();
-    const vercelToken = process.env.VERCEL_API_TOKEN;
+    const vercelToken = process.env.PIPELINE_VERCEL_TOKEN;
     if (!vercelToken) {
-      console.warn("VERCEL_API_TOKEN not found, skipping deployment protection disablement");
+      console.warn("PIPELINE_VERCEL_TOKEN not found, skipping deployment protection disablement");
       return { success: false };
     }
     

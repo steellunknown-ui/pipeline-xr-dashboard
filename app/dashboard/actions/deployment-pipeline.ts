@@ -53,7 +53,7 @@ export async function runDeploymentPipeline(deploymentId: string) {
     await supabase.from("deployments").update({ status: "building" }).eq("id", deploymentId);
     await insertLogIfNew(deploymentId, user.id, "🚀 Contacting Vercel...", "info");
 
-    const vercelToken = process.env.VERCEL_API_TOKEN;
+    const vercelToken = process.env.PIPELINE_VERCEL_TOKEN;
     const teamId = process.env.VERCEL_TEAM_ID;
 
     if (!vercelToken) {
