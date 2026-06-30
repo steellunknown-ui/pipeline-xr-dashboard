@@ -93,9 +93,9 @@ export async function runDeploymentPipeline(deploymentId: string) {
       }
     });
 
-    let vercelUrl = "https://api.vercel.com/v13/deployments";
+    let vercelUrl = "https://api.vercel.com/v13/deployments?skipAutoDetectionConfirmation=1";
     if (teamId) {
-      vercelUrl += `?teamId=${teamId}`;
+      vercelUrl += `&teamId=${teamId}`;
     }
 
     const vercelRes = await fetch(vercelUrl, {

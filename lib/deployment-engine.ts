@@ -110,7 +110,7 @@ export class DeploymentEngine {
       // 2. Trigger Vercel Build via API
       await log(`🚀 Triggering Vercel deployment on branch ${branch}...`);
       
-      const deployRes = await fetch(`https://api.vercel.com/v13/deployments${teamIdStr}`, {
+      const deployRes = await fetch(`https://api.vercel.com/v13/deployments${teamIdStr ? teamIdStr + '&' : '?'}skipAutoDetectionConfirmation=1`, {
         method: 'POST',
         headers: {
           'Authorization': `Bearer ${vercelToken}`,
