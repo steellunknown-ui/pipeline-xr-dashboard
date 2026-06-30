@@ -154,7 +154,10 @@ export async function POST(req: Request) {
     const commitMessage = deploymentData.meta?.githubCommitMessage || "";
     console.log(`🔔 [WEBHOOK] Deployment ${vercelId} changed state to: ${state}`);
 
-    const supabase = await getSupabaseServer();
+    const supabase = createClient(
+      process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+    );
 
     // Find the deployment in our DB
     const { data: deployment } = await supabase
@@ -183,7 +186,7 @@ export async function POST(req: Request) {
       // 2. Trigger alias fetching and screenshot asynchronously (don't await)
       pollForAliasWithRetries(deployment.id, vercelId, projectId, process.env.PIPELINE_XR_VERCEL_TOKEN!);
 
-    } else if (state === "ERROR") {
+    } else if (state === "ERROR" || state === "CANCELED") {
       // Fetch error logs to store locally
       let logsData = [];
       try {
