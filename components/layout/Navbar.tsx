@@ -117,7 +117,7 @@ export const Navbar = () => {
           href="/" 
           className="transition-colors duration-300 flex items-center"
         >
-          <Image src="/images/logo-full.png" alt="Pipeline XR" width={400} height={100} className={`object-contain h-12 w-auto scale-[2] origin-left pl-2 ${lightMode ? '' : 'invert'}`} />
+          <Image src="/images/logo-full.png" alt="Pipeline XR" width={400} height={100} className={`object-contain h-12 w-auto scale-[2.2] origin-left pl-2 ${lightMode ? '' : 'invert'}`} />
         </Link>
 
         <div className="flex items-center gap-8">

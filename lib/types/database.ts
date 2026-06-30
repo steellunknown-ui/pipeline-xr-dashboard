@@ -2,7 +2,12 @@ export type Project = {
   id: string;
   user_id: string;
   name: string;
+  github_repo_id?: number | null;
+  github_repo_full_name?: string | null;
+  github_owner?: string | null;
+  github_default_branch?: string | null;
   github_repo_url: string;
+  framework?: string | null;
   webhook_enabled: boolean;
   auto_deploy_branch: string | null;
   webhook_secret: string | null;
@@ -25,14 +30,16 @@ export type Deployment = {
   branch: string;
   commit_hash?: string | null;
   commit_sha?: string | null;
-  source?: "github" | "zip" | "manual";
+  source?: "github" | "zip" | "manual" | string;
   deployment_url?: string | null;
   vercel_deployment_id?: string | null;
   alias_url?: string | null;
   alias_status?: "pending" | "assigned" | "failed";
   preview_image_url?: string | null;
   ai_fix_attempts?: number | null;
-  ai_fix_status?: string | null;
+  ai_fix_status?: "idle" | "investigating" | "fixing" | "success" | "failed" | "exhausted" | string | null;
+  ai_fix_diff?: any | null; // Stores JSON diffs of AI fixes
+  ai_fix_branch?: string | null;
   status: "pending" | "building" | "success" | "failed" | "cancelled";
   created_at: string;
   env_fingerprint?: string | null;

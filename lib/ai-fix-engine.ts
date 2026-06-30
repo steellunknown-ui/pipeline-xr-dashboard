@@ -1,199 +1,57 @@
-import fs from 'fs';
-import path from 'path';
-import os from 'os';
-import { exec } from 'child_process';
-import util from 'util';
 import { getSupabaseServer } from '@/lib/supabase-server';
 import { fixAI } from '@/lib/ai-client';
-
-const execAsync = util.promisify(exec);
+import { 
+  getLatestCommitSha, 
+  getCommitDetails, 
+  createBlob, 
+  createTree, 
+  createCommit, 
+  updateBranchRef, 
+  createBranch, 
+  createPullRequest 
+} from './github-api';
 
 export type FixStrategy = 'direct_push' | 'pull_request';
 
-async function logToDeployment(supabase: any, deploymentId: string, userId: string, message: string) {
-  await supabase.from('deployment_logs').insert({
-    deployment_id: deploymentId,
-    user_id: userId,
-    log_text: message
-  });
-}
-
-export async function startAiFixLoop(deploymentId: string, fixStrategy: FixStrategy) {
-  const supabase = await getSupabaseServer();
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) throw new Error("Unauthorized");
-
-  // Fetch deployment & project info
-  const { data: deployment } = await supabase
-    .from('deployments')
-    .select('*, projects(*)')
-    .eq('id', deploymentId)
-    .single();
-
-  if (!deployment || !deployment.projects) {
-    throw new Error("Deployment or Project not found");
-  }
-
-  const project = Array.isArray(deployment.projects) ? deployment.projects[0] : deployment.projects;
-  const githubUrl = project.github_repo_url;
-  const branch = project.auto_deploy_branch || project.default_branch || 'main';
-  const attempts = deployment.ai_fix_attempts || 0;
-
-  if (attempts >= 3) {
-    await supabase.from('deployments').update({ ai_fix_status: 'failed_max_attempts' }).eq('id', deploymentId);
-    await logToDeployment(supabase, deploymentId, user.id, '❌ AI Fixer reached maximum attempts (3). Halting.');
-    return;
-  }
-
-  // Update status
-  await supabase.from('deployments').update({ 
-    ai_fix_status: 'analyzing', 
-    ai_fix_attempts: attempts + 1 
-  }).eq('id', deploymentId);
-
-  await logToDeployment(supabase, deploymentId, user.id, `🤖 AI Fixer Attempt ${attempts + 1}/3 started...`);
-
-  // Fetch failed logs
-  const { data: logs } = await supabase
-    .from('deployment_logs')
-    .select('log_text')
-    .eq('deployment_id', deploymentId)
-    .order('created_at', { ascending: true });
-
-  const fullLog = logs?.map(l => l.log_text).join('\n') || '';
-
-  // ENV Guardrail
-  if (
-    fullLog.includes('process.env') || 
-    fullLog.includes('NEXT_PUBLIC_') || 
-    fullLog.toLowerCase().includes('missing environment variable') ||
-    fullLog.includes('is not defined') && fullLog.includes('.env')
-  ) {
-    await supabase.from('deployments').update({ ai_fix_status: 'failed_env' }).eq('id', deploymentId);
-    await logToDeployment(supabase, deploymentId, user.id, `🚨 AI Guardrail Triggered: The build error seems to be caused by missing Environment Variables. Please add your variables in the Settings and trigger a deploy manually. AI will not attempt to rewrite code to fix missing ENVs.`);
-    return;
-  }
-
-  // Setup temp workspace
-  const tmpDir = path.join(os.tmpdir(), `ai-fix-${Date.now()}`);
-  try {
-    fs.mkdirSync(tmpDir, { recursive: true });
-    
-    // Get Github Token
-    const { data: { session } } = await supabase.auth.getSession();
-    let githubToken = session?.provider_token;
-    if (!githubToken) {
-      const githubIdentity = user.identities?.find((id: any) => id.provider === 'github');
-      githubToken = githubIdentity?.identity_data?.access_token;
-    }
-
-    // Clone the repo
-    await logToDeployment(supabase, deploymentId, user.id, `📥 AI Cloning repository to local workspace...`);
-    let cloneUrl = githubUrl;
-    if (githubToken) {
-      cloneUrl = cloneUrl.replace('https://', `https://${githubToken}@`);
-    }
-    
-    await execAsync(`git clone --branch ${branch} --single-branch ${cloneUrl} .`, { cwd: tmpDir });
-
-    // AI Analysis (Placeholder for OpenRouter integration)
-    await logToDeployment(supabase, deploymentId, user.id, `🧠 Analyzing logs with OpenRouter...`);
-    
-    const aiResponse = await analyzeErrorWithOpenRouter(fullLog);
-    
-    // Apply the fix
-    if (aiResponse.cli_command) {
-       await logToDeployment(supabase, deploymentId, user.id, `⚙️ AI executing command: ${aiResponse.cli_command}`);
-       await execAsync(aiResponse.cli_command, { cwd: tmpDir });
-    }
-    
-    if (aiResponse.file_path && aiResponse.new_content) {
-      const targetFilePath = path.join(tmpDir, aiResponse.file_path);
-      if (fs.existsSync(targetFilePath)) {
-         await logToDeployment(supabase, deploymentId, user.id, `✏️ AI modifying file: ${aiResponse.file_path}`);
-         fs.writeFileSync(targetFilePath, aiResponse.new_content);
-      } else {
-         // Create the file if it doesn't exist, might be a missing component
-         await logToDeployment(supabase, deploymentId, user.id, `✏️ AI creating file: ${aiResponse.file_path}`);
-         fs.mkdirSync(path.dirname(targetFilePath), { recursive: true });
-         fs.writeFileSync(targetFilePath, aiResponse.new_content);
-      }
-    }
-
-    if (!aiResponse.cli_command && !aiResponse.file_path) {
-      throw new Error("AI failed to provide a valid fix structure (no command or file).");
-    }
-
-    // Test the fix
-    await logToDeployment(supabase, deploymentId, user.id, `🔨 AI running test build (npm i && npm run build)...`);
-    try {
-      await execAsync('npm install', { cwd: tmpDir });
-      await execAsync('npm run build', { cwd: tmpDir });
-      
-      // If we reach here, build passed!
-      await logToDeployment(supabase, deploymentId, user.id, `✅ AI Build passed successfully!`);
-      
-      // Push the fix
-      if (fixStrategy === 'direct_push') {
-        await logToDeployment(supabase, deploymentId, user.id, `🚀 AI pushing fix directly to ${branch}...`);
-        await execAsync(`git config user.name "Pipeline AI"`, { cwd: tmpDir });
-        await execAsync(`git config user.email "ai@pipeline-xr.com"`, { cwd: tmpDir });
-        await execAsync(`git add .`, { cwd: tmpDir });
-        await execAsync(`git commit -m "🤖 fix(pipeline-ai): resolved build failure in ${aiResponse.file_path}"`, { cwd: tmpDir });
-        await execAsync(`git push origin ${branch}`, { cwd: tmpDir });
-      } else {
-        // Handle PR logic (create branch, push, create PR via API)
-        const fixBranch = `pipeline-ai-fix-${Date.now()}`;
-        await logToDeployment(supabase, deploymentId, user.id, `🔀 AI pushing to new branch ${fixBranch} and creating PR...`);
-        await execAsync(`git checkout -b ${fixBranch}`, { cwd: tmpDir });
-        await execAsync(`git config user.name "Pipeline AI"`, { cwd: tmpDir });
-        await execAsync(`git config user.email "ai@pipeline-xr.com"`, { cwd: tmpDir });
-        await execAsync(`git add .`, { cwd: tmpDir });
-        await execAsync(`git commit -m "🤖 fix(pipeline-ai): resolved build failure in ${aiResponse.file_path}"`, { cwd: tmpDir });
-        await execAsync(`git push origin ${fixBranch}`, { cwd: tmpDir });
-        // Create PR using fetch to Github API...
-      }
-
-      await supabase.from('deployments').update({ ai_fix_status: 'success' }).eq('id', deploymentId);
-      
-    } catch (buildError: any) {
-      await logToDeployment(supabase, deploymentId, user.id, `❌ AI Build failed: ${buildError.message.substring(0, 500)}`);
-      // Recursively loop
-      startAiFixLoop(deploymentId, fixStrategy);
-    }
-
-  } catch (error: any) {
-    console.error("AI Fixer Error:", error);
-    await logToDeployment(supabase, deploymentId, user.id, `⚠️ AI Fixer internal error: ${error.message}`);
-    await supabase.from('deployments').update({ ai_fix_status: 'failed_internal' }).eq('id', deploymentId);
-  } finally {
-    // Cleanup
-    if (fs.existsSync(tmpDir)) {
-      fs.rmSync(tmpDir, { recursive: true, force: true });
-    }
-  }
-}
-
-async function analyzeErrorWithOpenRouter(logs: string) {
+export async function analyzeErrorWithOpenRouter(
+  logs: string, 
+  fileContent: string, 
+  filePath: string, 
+  repoTree: any
+) {
   const prompt = `You are an expert DevOps AI agent.
-The following build logs show a Next.js / Node.js deployment failure.
+The following build logs show a deployment failure.
 
-LOGS:
+ERROR LOGS:
 """
-${logs.substring(logs.length - 8000)}
+${logs.substring(logs.length - 4000)}
 """
+
+BROKEN FILE PATH: ${filePath}
+
+FILE CONTENT:
+"""
+${fileContent}
+"""
+
+REPO TREE CONTEXT:
+${JSON.stringify(repoTree.tree.slice(0, 50).map((t: any) => t.path))}
 
 Your goal is to fix this error. 
-You can either provide a CLI command to run (like installing a missing package), OR provide the exact full file path and the complete new file content to fix a code error, or both.
-
 Return ONLY a valid JSON object matching this schema:
 {
-  "cli_command": string | null, // e.g. "npx shadcn@latest add radio-group --yes" or "npm install foo"
-  "file_path": string | null, // e.g. "app/page.tsx"
-  "new_content": string | null // The full new source code of the file if replacing
+  "type": "CODE_FIX",
+  "file": "${filePath}",
+  "folder": string, // folder path
+  "lineStart": number, // line number where issue starts
+  "lineEnd": number, // line number where issue ends
+  "oldCode": string, // snippet of old code
+  "newCode": string, // exact new code to replace the old code block,
+  "reason": string, // brief explanation
+  "confidence": number // 0-100 score
 }
 
-If no file needs to be modified, set file_path and new_content to null.`;
+Focus ONLY on fixing the error. Return the exact JSON block, no markdown formatting.`;
 
   try {
     const response = await fixAI([
@@ -201,11 +59,82 @@ If no file needs to be modified, set file_path and new_content to null.`;
       { role: "user", content: prompt }
     ], { jsonMode: true, temperature: 0.1 });
     
-    // Strip markdown formatting if any
     const cleaned = response.replace(/^```json/g, '').replace(/```$/g, '').trim();
     return JSON.parse(cleaned);
   } catch (err) {
     console.error("OpenRouter API Failed", err);
     throw new Error("Failed to get response from AI model.");
+  }
+}
+
+export function applyFixToContent(originalContent: string, fixData: any): string {
+  // Try string replacement first (be careful with formatting)
+  if (originalContent.includes(fixData.oldCode)) {
+    return originalContent.replace(fixData.oldCode, fixData.newCode);
+  }
+  
+  // Fallback: replace specific lines
+  const lines = originalContent.split('\n');
+  const start = Math.max(0, fixData.lineStart - 1);
+  const end = Math.min(lines.length, fixData.lineEnd);
+  
+  const before = lines.slice(0, start).join('\n');
+  const after = lines.slice(end).join('\n');
+  
+  return [before, fixData.newCode, after].filter(Boolean).join('\n');
+}
+
+export async function pushFixToGithub(
+  token: string, 
+  owner: string, 
+  repo: string, 
+  branch: string, 
+  filePath: string, 
+  newContent: string, 
+  reason: string,
+  strategy: FixStrategy,
+  originalDiff: any = null
+) {
+  // CALL 1: Get latest commit SHA
+  const latestCommitSha = await getLatestCommitSha(token, owner, repo, branch);
+
+  // CALL 2: Get tree SHA
+  const commitDetails = await getCommitDetails(token, owner, repo, latestCommitSha);
+  const currentTreeSha = commitDetails.tree.sha;
+
+  // CALL 3: Create new blob (fixed file)
+  const newBlobSha = await createBlob(token, owner, repo, newContent);
+
+  // CALL 4: Create new tree
+  const newTreeSha = await createTree(token, owner, repo, currentTreeSha, filePath, newBlobSha);
+
+  // CALL 5: Create commit
+  const commitMessage = `fix: AI auto-fix by Pipeline XR — ${reason}`;
+  const newCommitSha = await createCommit(token, owner, repo, commitMessage, newTreeSha, latestCommitSha);
+
+  if (strategy === 'direct_push') {
+    // CALL 6: Update main branch pointer
+    await updateBranchRef(token, owner, repo, branch, newCommitSha);
+    return { newCommitSha, prUrl: null, fixBranch: branch };
+  } else {
+    // CALL 6: Create new branch
+    const timestamp = Date.now();
+    const fixBranch = `ai-fix-${timestamp}`;
+    await createBranch(token, owner, repo, fixBranch, newCommitSha);
+
+    // CALL 7: Create Pull Request
+    const body = `**File:** ${filePath}\n**Lines:** ${originalDiff?.lineStart || '?'}–${originalDiff?.lineEnd || '?'}\n**Reason:** ${reason}\n\n**Old:**\n\`\`\`\n${originalDiff?.oldCode || '...'}\n\`\`\`\n\n**New:**\n\`\`\`\n${originalDiff?.newCode || '...'}\n\`\`\``;
+    
+    const prResponse = await createPullRequest(
+      token, 
+      owner, 
+      repo, 
+      "🤖 AI Auto-Fix by Pipeline XR", 
+      body, 
+      fixBranch, 
+      branch
+    );
+    
+    return { newCommitSha, prUrl: prResponse.html_url, fixBranch };
   }
 }

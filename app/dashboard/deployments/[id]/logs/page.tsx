@@ -47,44 +47,13 @@ export default function DeploymentLogsPage() {
   const [envValue, setEnvValue] = useState("");
   const [addingEnv, setAddingEnv] = useState(false);
   const [showExplanation, setShowExplanation] = useState(false);
-
-  // AI Fixer state
-  const [showFixModal, setShowFixModal] = useState(false);
-  const [fixStrategy, setFixStrategy] = useState<'direct_push' | 'pull_request'>('direct_push');
-  const [isStartingFix, setIsStartingFix] = useState(false);
   
   const logsEndRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     fetchData();
 
-    const logChannel = supabase
-      .channel(`deployment_logs:${deploymentId}`)
-      .on(
-        'postgres_changes',
-        {
-          event: 'INSERT',
-          schema: 'public',
-          table: 'deployment_logs',
-          filter: `deployment_id=eq.${deploymentId}`,
-        },
-        (payload) => {
-          const newLog = payload.new as DeploymentLog;
-          setLogs((prev) => [...prev, newLog]);
-          
-          // Pop up a toast for AI Fixer events so the user knows what's happening in the background
-          const txt = newLog.message || '';
-          if (txt.startsWith('🤖') || txt.startsWith('🧠') || txt.startsWith('📥') || txt.startsWith('✏️') || txt.startsWith('⚙️') || txt.startsWith('🔨') || txt.startsWith('🚀') || txt.startsWith('🔀')) {
-            toast.info(txt, {
-              duration: 4000,
-              position: 'bottom-right',
-              icon: '✨'
-            });
-          }
-        }
-      )
-      .subscribe();
-
+    // 1. Supabase channel for deployment status updates
     const statusChannel = supabase
       .channel(`deployment_status:${deploymentId}`)
       .on(
@@ -102,7 +71,6 @@ export default function DeploymentLogsPage() {
       .subscribe();
 
     return () => {
-      supabase.removeChannel(logChannel);
       supabase.removeChannel(statusChannel);
     };
   }, [deploymentId]);
@@ -111,35 +79,40 @@ export default function DeploymentLogsPage() {
     if (!deployment || !deployment.vercel_deployment_id) return;
     if (deployment.status !== "pending" && deployment.status !== "building") return;
 
-    let pollCount = 0;
-    const maxPolls = 200; // 10 minutes (3s * 200)
+    // 2. SSE for live logs and terminal updates
+    const eventSource = new EventSource(`/api/deployments/${deploymentId}/logs-stream`);
 
-    const interval = setInterval(async () => {
-      pollCount++;
-      if (pollCount > maxPolls) {
-        clearInterval(interval);
-        return;
-      }
+    eventSource.onmessage = (e) => {
       try {
-        const res = await fetch('/api/deploy', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ deploymentId })
-        });
-        const data = await res.json();
+        const data = JSON.parse(e.data);
         
-        if (data.status && data.status !== deployment.status) {
-          setDeployment((prev: any) => prev ? { ...prev, status: data.status, deployment_url: data.deployment_url || prev.deployment_url } : prev);
-        }
-        
-        if (data.state === 'READY' || data.state === 'ERROR' || data.state === 'CANCELED') {
-          clearInterval(interval);
+        if (data.type === "log" && data.text) {
+          setLogs((prev) => [
+            ...prev,
+            {
+              id: Math.random().toString(),
+              deployment_id: deploymentId,
+              user_id: deployment.user_id,
+              log_text: data.text,
+              message: data.text,
+              level: "info",
+              created_at: new Date(data.timestamp).toISOString()
+            } as DeploymentLog
+          ]);
+        } else if (data.type === "status" && data.state) {
+          if (data.state === "READY" || data.state === "ERROR" || data.state === "CANCELED" || data.state === "ENDED") {
+             eventSource.close();
+             // Refetch final data to ensure consistency
+             fetchData();
+          }
         }
       } catch (err) {}
-    }, 3000);
+    };
 
-    return () => clearInterval(interval);
-  }, [deployment?.vercel_deployment_id, deployment?.status, deploymentId]);
+    return () => {
+      eventSource.close();
+    };
+  }, [deployment?.vercel_deployment_id, deploymentId]);
 
   useEffect(() => {
     logsEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -184,7 +157,19 @@ export default function DeploymentLogsPage() {
         .single(),
     ]);
 
-    if (logsRes.data) setLogs(logsRes.data);
+    if (logsRes.data) {
+      setLogs(prev => {
+        const merged = [...logsRes.data];
+        const dbIds = new Set(merged.map(l => l.id));
+        for (const p of prev) {
+          if (!dbIds.has(p.id)) {
+            merged.push(p);
+          }
+        }
+        merged.sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime());
+        return merged;
+      });
+    }
     if (deploymentRes.data) setDeployment(deploymentRes.data);
     if (logsRes.error || deploymentRes.error) toast.error('Failed to load logs');
     setLoading(false);
@@ -257,28 +242,7 @@ export default function DeploymentLogsPage() {
     }
   }
 
-  async function handleStartAiFix() {
-    setIsStartingFix(true);
-    try {
-      const res = await fetch('/api/ai-fix', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ deploymentId, strategy: fixStrategy })
-      });
-      const data = await res.json();
-      if (res.ok && data.success) {
-        toast.success("AI Fix Engine started!");
-        setShowFixModal(false);
-        // The logs will naturally update via realtime
-      } else {
-        toast.error(data.error || "Failed to start AI Fixer");
-      }
-    } catch (err) {
-      toast.error("An error occurred while starting AI Fixer");
-    } finally {
-      setIsStartingFix(false);
-    }
-  }
+
 
   const getLevelColor = (level: string) => {
     switch (level) {
@@ -352,16 +316,7 @@ export default function DeploymentLogsPage() {
             {redeploying ? 'Creating...' : 'Re-deploy'}
           </Button>
 
-          {deployment?.status === 'failed' && (
-            <Button
-              className="bg-indigo-600 hover:bg-indigo-700 text-white shadow-lg shadow-indigo-500/20"
-              size="sm"
-              onClick={() => setShowFixModal(true)}
-            >
-              <FileCode2 className="h-4 w-4 mr-2" />
-              Fix with Agent
-            </Button>
-          )}
+
 
           <Dialog open={showConfirm} onOpenChange={setShowConfirm}>
             <DialogTrigger asChild>
@@ -490,6 +445,7 @@ export default function DeploymentLogsPage() {
         <AIFixAssistant
           deploymentId={deploymentId}
           projectId={deployment.project_id}
+          aiFixStatus={deployment.ai_fix_status}
           onFixApplied={() => fetchData()}
         />
       )}
@@ -579,62 +535,7 @@ export default function DeploymentLogsPage() {
         onClose={() => setShowExplanation(false)}
       />
 
-      {/* AI Fixer Modal */}
-      <Dialog open={showFixModal} onOpenChange={setShowFixModal}>
-        <DialogContent className="sm:max-w-[500px]">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2">
-              <FileCode2 className="h-5 w-5 text-indigo-500 dark:text-indigo-400" />
-              Fix Code with AI Agent
-            </DialogTitle>
-            <DialogDescription>
-              Our Autonomous AI Agent will analyze the error, rewrite the broken code, and run a test build. Choose how you want the AI to push the fix:
-            </DialogDescription>
-          </DialogHeader>
-          
-          <div className="py-4">
-            <RadioGroup value={fixStrategy} onValueChange={(val: any) => setFixStrategy(val)} className="space-y-4">
-              <div className="flex items-start space-x-3 rounded-lg border border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-900/50 p-4 transition-colors hover:border-indigo-500/50">
-                <RadioGroupItem value="direct_push" id="direct_push" className="mt-1" />
-                <div className="space-y-1">
-                  <Label htmlFor="direct_push" className="text-base font-medium cursor-pointer">
-                    Direct Push (Maximum Speed)
-                  </Label>
-                  <p className="text-sm text-zinc-500 dark:text-zinc-400">
-                    The AI will push the fix directly to your branch (<code className="text-xs text-indigo-600 dark:text-indigo-300">{deployment?.branch}</code>). Ideal for fast iterative fixes without jumping into GitHub.
-                  </p>
-                </div>
-              </div>
-              <div className="flex items-start space-x-3 rounded-lg border border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-900/50 p-4 transition-colors hover:border-indigo-500/50">
-                <RadioGroupItem value="pull_request" id="pull_request" className="mt-1" />
-                <div className="space-y-1">
-                  <Label htmlFor="pull_request" className="text-base font-medium cursor-pointer">
-                    Pull Request (Safe)
-                  </Label>
-                  <p className="text-sm text-zinc-500 dark:text-zinc-400">
-                    The AI will create a new branch and open a PR. You can review the code on GitHub before merging. 
-                  </p>
-                </div>
-              </div>
-            </RadioGroup>
-          </div>
-          
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setShowFixModal(false)} disabled={isStartingFix}>
-              Cancel
-            </Button>
-            <Button className="bg-indigo-600 hover:bg-indigo-700 text-white" onClick={handleStartAiFix} disabled={isStartingFix}>
-              {isStartingFix ? (
-                <>
-                  <Loader2 className="mr-2 h-4 w-4 animate-spin" /> Starting...
-                </>
-              ) : (
-                'Start AI Fix Loop'
-              )}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+
 
     </div>
   );

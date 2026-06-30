@@ -53,27 +53,45 @@ export async function runDeploymentPipeline(deploymentId: string) {
     await supabase.from("deployments").update({ status: "building" }).eq("id", deploymentId);
     await insertLogIfNew(deploymentId, user.id, "🚀 Contacting Vercel...", "info");
 
-    const vercelToken = process.env.PIPELINE_VERCEL_TOKEN;
+    const vercelToken = process.env.PIPELINE_XR_VERCEL_TOKEN || process.env.PIPELINE_VERCEL_TOKEN;
     const teamId = process.env.VERCEL_TEAM_ID;
 
     if (!vercelToken) {
       return { success: false, error: "Vercel API token not configured." };
     }
 
-    // Extract owner/repo from URL
-    const repoMatch = deployment.projects.github_repo_url.match(/github\.com\/([^\/]+)\/([^\/]+)/);
-    if (!repoMatch) {
-      return { success: false, error: "Invalid GitHub repository URL format." };
-    }
-    const owner = repoMatch[1];
-    const repo = repoMatch[2];
+    let repoId = deployment.projects.github_repo_id?.toString();
+    const owner = deployment.projects.github_owner || deployment.projects.github_repo_full_name?.split('/')[0];
+    
+    if (!repoId) {
+      // Extract owner/repo from URL
+      const repoMatch = deployment.projects.github_repo_url.match(/github\.com\/([^\/]+)\/([^\/]+)/);
+      if (!repoMatch) {
+        return { success: false, error: "Invalid GitHub repository URL format." };
+      }
+      const repoOwner = repoMatch[1];
+      const repoName = repoMatch[2];
 
-    const ghRes = await fetch(`https://api.github.com/repos/${owner}/${repo}`);
-    if (!ghRes.ok) {
-      return { success: false, error: "Failed to fetch repository details from GitHub API." };
+      const ghRes = await fetch(`https://api.github.com/repos/${repoOwner}/${repoName}`);
+      if (!ghRes.ok) {
+        return { success: false, error: "Failed to fetch repository details from GitHub API." };
+      }
+      const ghData = await ghRes.json();
+      repoId = ghData.id.toString();
     }
-    const ghData = await ghRes.json();
-    const repoId = ghData.id.toString();
+
+    // Fetch env vars
+    const { data: envVars } = await supabase
+      .from("environment_variables")
+      .select("*")
+      .eq("project_id", deployment.projects.id);
+
+    const vercelEnv: Record<string, string> = {};
+    envVars?.forEach((e: any) => {
+      if (e.key && e.value) {
+        vercelEnv[e.key] = e.value;
+      }
+    });
 
     let vercelUrl = "https://api.vercel.com/v13/deployments";
     if (teamId) {
@@ -91,8 +109,11 @@ export async function runDeploymentPipeline(deploymentId: string) {
         gitSource: {
           type: "github",
           ref: deployment.branch,
-          repoId: repoId
-        }
+          repoId: repoId,
+          org: owner || undefined
+        },
+        env: Object.keys(vercelEnv).length > 0 ? vercelEnv : undefined,
+        projectSettings: deployment.projects.framework ? { framework: deployment.projects.framework } : undefined
       })
     });
 

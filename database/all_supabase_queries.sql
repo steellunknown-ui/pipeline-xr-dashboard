@@ -896,3 +896,12 @@ ALTER TABLE projects ADD COLUMN IF NOT EXISTS production_alias_url TEXT;
 ALTER TABLE projects ADD COLUMN IF NOT EXISTS vercel_deployment_url TEXT;
 
 90th one:- ALTER TABLE projects ALTER COLUMN github_repo_url DROP NOT NULL;
+
+-- 91st one: Multi-User & AI Auto-Fix Enhancements
+ALTER TABLE projects ADD COLUMN IF NOT EXISTS github_repo_id BIGINT;
+ALTER TABLE projects ADD COLUMN IF NOT EXISTS github_owner TEXT;
+ALTER TABLE projects ADD COLUMN IF NOT EXISTS framework TEXT;
+
+ALTER TABLE deployments ADD COLUMN IF NOT EXISTS ai_fix_diff JSONB;
+ALTER TABLE deployments ADD COLUMN IF NOT EXISTS ai_fix_branch TEXT;
+

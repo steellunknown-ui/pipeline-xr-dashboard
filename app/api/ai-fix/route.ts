@@ -1,32 +1,139 @@
-import { NextResponse } from 'next/server';
-import { getSupabaseServer } from '@/lib/supabase-server';
-import { startAiFixLoop } from '@/lib/ai-fix-engine';
+import { getSupabaseServer } from "@/lib/supabase-server";
+import { getRepoTree, getFileContent } from "@/lib/github-api";
+import { analyzeErrorWithOpenRouter } from "@/lib/ai-fix-engine";
 
-export async function POST(req: Request) {
-  try {
-    const supabase = await getSupabaseServer();
-    const { data: { user } } = await supabase.auth.getUser();
-    
-    if (!user) {
-      return NextResponse.json({ success: false, error: "Unauthorized" }, { status: 401 });
-    }
+export const dynamic = "force-dynamic";
 
-    const { deploymentId, strategy } = await req.json();
+export async function GET(req: Request) {
+  const { searchParams } = new URL(req.url);
+  const deploymentId = searchParams.get("deploymentId");
 
-    if (!deploymentId || !strategy) {
-      return NextResponse.json({ success: false, error: "Missing required fields" }, { status: 400 });
-    }
-
-    // Trigger the background loop asynchronously so the API returns quickly
-    // Note: In Vercel serverless, background tasks might get killed. 
-    // WaitUntil is available in Next.js experimental, but for now we just fire it.
-    startAiFixLoop(deploymentId, strategy).catch(err => {
-      console.error("Background AI Fixer failed:", err);
-    });
-
-    return NextResponse.json({ success: true, message: "AI Fixer started in the background" });
-  } catch (error: any) {
-    console.error("AI Fix API Error:", error);
-    return NextResponse.json({ success: false, error: error.message }, { status: 500 });
+  if (!deploymentId) {
+    return new Response("Missing deploymentId", { status: 400 });
   }
+
+  const supabase = await getSupabaseServer();
+  const { data: { session } } = await supabase.auth.getSession();
+  const { data: { user } } = await supabase.auth.getUser();
+
+  if (!session || !user) {
+    return new Response("Unauthorized", { status: 401 });
+  }
+
+  let githubToken = session.provider_token;
+  if (!githubToken) {
+    const githubIdentity = user.identities?.find((id: any) => id.provider === "github");
+    githubToken = githubIdentity?.identity_data?.access_token;
+  }
+
+  if (!githubToken) {
+    return new Response("Missing GitHub token", { status: 403 });
+  }
+
+  const stream = new ReadableStream({
+    async start(controller) {
+      const sendStep = (step: string, text: string) => {
+        controller.enqueue(`data: ${JSON.stringify({ type: "step", step, text })}\n\n`);
+      };
+
+      try {
+        sendStep("analyze", "🔍 Analyzing crash logs...");
+        
+        // 1. Fetch deployment & project
+        const { data: deployment } = await supabase
+          .from("deployments")
+          .select("*, projects(*)")
+          .eq("id", deploymentId)
+          .single();
+          
+        if (!deployment) throw new Error("Deployment not found");
+        
+        const project = Array.isArray(deployment.projects) ? deployment.projects[0] : deployment.projects;
+        const owner = project.github_owner;
+        const repoName = project.github_repo_full_name?.split('/')[1] || project.name; // fallback
+
+        // Fetch logs
+        const { data: logs } = await supabase
+          .from("deployment_logs")
+          .select("log_text")
+          .eq("deployment_id", deploymentId)
+          .order("created_at", { ascending: true });
+          
+        const fullLogs = logs?.map(l => l.log_text).join("\n") || "";
+        
+        // SUB-STEP 1: ENV GUARDRAIL
+        sendStep("env", "🛡️ Checking for ENV issues...");
+        const envPatterns = [
+          "missing environment variable",
+          "process.env.", "is undefined", "not defined",
+          "next_public_ not found",
+          "api key not found",
+          "secret not configured",
+          "unauthorized",
+          "invalid api key"
+        ];
+        
+        const logLower = fullLogs.toLowerCase();
+        const hasEnvError = envPatterns.some(p => logLower.includes(p));
+        
+        if (hasEnvError) {
+          controller.enqueue(`data: ${JSON.stringify({ 
+            type: "ENV_ERROR", 
+            message: "These environment variables are missing or invalid. Please add them in Project Settings → Environment Variables and deploy again."
+          })}\n\n`);
+          controller.close();
+          return;
+        }
+
+        // SUB-STEP 2: FETCH REPO FILE TREE
+        sendStep("tree", "📁 Fetching repo structure...");
+        const branch = deployment.branch || project.github_default_branch || "main";
+        const repoTree = await getRepoTree(githubToken, owner, repoName, branch);
+        
+        // SUB-STEP 3: IDENTIFY & FETCH THE BROKEN FILE
+        sendStep("file", "📂 Identifying broken file...");
+        const { chatAI } = require("@/lib/ai-client");
+        const extractPathRes = await chatAI([{
+          role: "user", 
+          content: `Extract the broken file path from these logs. Return ONLY the file path string, nothing else.\n\n${fullLogs.substring(fullLogs.length - 2000)}`
+        }]);
+        
+        const filePath = extractPathRes.trim();
+        sendStep("file", `📂 Opening ${filePath}...`);
+        
+        const fileData = await getFileContent(githubToken, owner, repoName, filePath);
+        const fileContent = Buffer.from(fileData.content, 'base64').toString('utf-8');
+
+        // SUB-STEP 4: AI GENERATES FIX
+        sendStep("read", "👁️ Reading code...");
+        sendStep("think", "🧠 AI generating fix...");
+        
+        const fixResult = await analyzeErrorWithOpenRouter(fullLogs, fileContent, filePath, repoTree);
+        
+        sendStep("write", "✏️ Writing new code...");
+        
+        // Finalize
+        sendStep("ready", `✅ Fix ready! Confidence: ${fixResult.confidence}%`);
+        
+        controller.enqueue(`data: ${JSON.stringify({ 
+          type: "FIX_READY", 
+          fix: fixResult
+        })}\n\n`);
+
+      } catch (error: any) {
+        console.error("AI Fix SSE Error:", error);
+        controller.enqueue(`data: ${JSON.stringify({ type: "error", message: error.message })}\n\n`);
+      } finally {
+        controller.close();
+      }
+    }
+  });
+
+  return new Response(stream, {
+    headers: {
+      "Content-Type": "text/event-stream",
+      "Cache-Control": "no-cache",
+      "Connection": "keep-alive",
+    }
+  });
 }

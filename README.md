@@ -58,6 +58,24 @@ If you are looking at this repository, this project demonstrates a deep understa
 
 ---
 
+## ⚙️ Vercel Webhook Configuration (Required)
+
+To enable real-time deployment status updates and logs in Pipeline XR, you **MUST** configure a webhook in your Vercel account that points to this application.
+
+1. Go to your Vercel Team Dashboard -> **Settings** -> **Webhooks**.
+2. Click **Add Webhook**.
+3. Under **Endpoint URL**, enter the EXACT production URL where your Pipeline XR dashboard is hosted, followed by `/api/webhooks/vercel`. 
+   - Example: `https://your-pipeline-xr-domain.vercel.app/api/webhooks/vercel`
+4. Under **Events**, select the following:
+   - `deployment.created`
+   - `deployment.succeeded`
+   - `deployment.error`
+   - `deployment.canceled`
+5. Click **Create Webhook**.
+6. **CRITICAL SECURITY STEP:** Vercel will generate a `secret` for this webhook. You **must** copy this secret and add it to your Vercel Environment Variables for the Pipeline XR project as `PIPELINE_WEBHOOK_SECRET`. The platform uses HMAC SHA1 signature verification to protect your database from unauthorized webhook payloads.
+
+---
+
 ## 🚀 Getting Started
 
 To run Pipeline XR locally:

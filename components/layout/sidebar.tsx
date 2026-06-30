@@ -98,8 +98,8 @@ export function Sidebar() {
       >
         {/* Logo */}
         <div className="flex h-14 items-center gap-3 px-5 border-b border-border">
-          <div className="h-8 w-8 flex items-center justify-center flex-shrink-0 bg-transparent overflow-hidden">
-            <Image src="/images/xr-logo.png" alt="XR Logo" width={32} height={32} className="object-contain dark:invert" />
+          <div className="h-10 w-10 flex items-center justify-center flex-shrink-0 bg-transparent overflow-hidden">
+            <Image src="/images/xr-logo.png" alt="XR Logo" width={48} height={48} className="object-contain dark:invert" />
           </div>
           <span className="text-base font-bold tracking-tight">Pipeline XR</span>
         </div>
@@ -129,8 +129,8 @@ export function Sidebar() {
       >
         {/* Logo */}
         <div className="flex h-14 items-center border-b border-border px-[18px] flex-shrink-0">
-          <div className="h-8 w-8 flex items-center justify-center flex-shrink-0 bg-transparent overflow-hidden">
-            <Image src="/images/xr-logo.png" alt="XR Logo" width={32} height={32} className="object-contain dark:invert" />
+          <div className="h-10 w-10 flex items-center justify-center flex-shrink-0 bg-transparent overflow-hidden">
+            <Image src="/images/xr-logo.png" alt="XR Logo" width={48} height={48} className="object-contain dark:invert" />
           </div>
           {expanded && (
             <span className="ml-3 text-base font-bold tracking-tight whitespace-nowrap">Pipeline XR</span>

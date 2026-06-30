@@ -6,7 +6,10 @@ export async function connectRepoToProject(
   projectId: string,
   repoFullName: string,
   repoUrl: string,
-  defaultBranch: string
+  defaultBranch: string,
+  repoId?: number,
+  owner?: string,
+  framework?: string
 ) {
   try {
     const supabase = await getSupabaseServer();
@@ -23,6 +26,9 @@ export async function connectRepoToProject(
         github_repo_url: repoUrl,
         github_default_branch: defaultBranch,
         github_connected_at: new Date().toISOString(),
+        github_repo_id: repoId,
+        github_owner: owner,
+        framework: framework,
       })
       .eq("id", projectId)
       .eq("user_id", user.id);
