@@ -126,22 +126,25 @@ export default function DeploymentLogsPage() {
     }
   }, [deployment?.status]);
 
-  const previousStatus = useRef<string | undefined>(deployment?.status);
+  const previousStatus = useRef<string | undefined>(undefined);
 
-  // Track status transitions
+  // Track status transitions — show failed popup when status becomes 'failed'
   useEffect(() => {
-    if (deployment?.status) {
-      if (previousStatus.current === 'deploying' && deployment.status === 'success' && deployment.project_id) {
-        toast.success("Deployment successful! Redirecting to dashboard...");
-        // Add a slight delay so they can see the final logs before redirecting
-        setTimeout(() => {
-          router.push(`/dashboard/projects/${deployment.project_id}`);
-        }, 1500);
-      } else if (previousStatus.current && previousStatus.current !== 'failed' && deployment.status === 'failed') {
-        setShowFailedPopup(true);
-      }
-      previousStatus.current = deployment.status;
+    if (!deployment?.status) return;
+
+    const prev = previousStatus.current;
+    const curr = deployment.status;
+
+    if (curr === 'failed' && prev !== 'failed' && prev !== undefined) {
+      setShowFailedPopup(true);
     }
+
+    if (curr === 'success' && prev !== 'success' && deployment.project_id) {
+      toast.success("Deployment successful! Redirecting...");
+      setTimeout(() => router.push(`/dashboard/projects/${deployment.project_id}`), 1500);
+    }
+
+    previousStatus.current = curr;
   }, [deployment?.status, deployment?.project_id, router]);
 
   async function fetchData() {
@@ -173,7 +176,13 @@ export default function DeploymentLogsPage() {
         return merged;
       });
     }
-    if (deploymentRes.data) setDeployment(deploymentRes.data);
+    if (deploymentRes.data) {
+      setDeployment(deploymentRes.data);
+      // Set initial status so we only trigger popup on TRANSITIONS, not on page load
+      if (previousStatus.current === undefined) {
+        previousStatus.current = deploymentRes.data.status;
+      }
+    }
     if (logsRes.error || deploymentRes.error) toast.error('Failed to load logs');
     setLoading(false);
   }

@@ -148,14 +148,18 @@ export async function POST(req: Request) {
     }
 
     const vercelId = deploymentData.id;
-    let state = deploymentData.state || deploymentData.readyState; // e.g. "READY", "ERROR", "CANCELED"
+    let state = deploymentData.state || deploymentData.readyState;
     
-    // If state is missing, derive it from the webhook event type
     if (!state && body.type) {
-       if (body.type === "deployment.succeeded") state = "READY";
-       else if (body.type === "deployment.error") state = "ERROR";
-       else if (body.type === "deployment.canceled") state = "CANCELED";
-       else if (body.type === "deployment.created") state = "BUILDING";
+      if (body.type === "deployment.succeeded") state = "READY";
+      else if (body.type === "deployment.error") state = "ERROR";
+      else if (body.type === "deployment.canceled") state = "CANCELED";
+      else if (body.type === "deployment.created") state = "BUILDING";
+    }
+
+    // Skip BUILDING events — we only care about terminal states
+    if (state === "BUILDING") {
+      return NextResponse.json({ success: true, skipped: "building event" });
     }
     
     const commitMessage = deploymentData.meta?.githubCommitMessage || "";
@@ -163,17 +167,28 @@ export async function POST(req: Request) {
 
     const supabase = createClient(
       process.env.NEXT_PUBLIC_SUPABASE_URL!,
-      process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+      process.env.SUPABASE_SERVICE_ROLE_KEY!
     );
 
-    // Find the deployment in our DB
-    const { data: deployment } = await supabase
+    // Find the deployment — try vercel_deployment_id first, then deployment_url
+    let { data: deployment } = await supabase
       .from("deployments")
-      .select("*")
+      .select("*, projects(*)")
       .eq("vercel_deployment_id", vercelId)
       .single();
 
+    // Fallback: match by URL if id not found
+    if (!deployment && deploymentData.url) {
+      const { data: byUrl } = await supabase
+        .from("deployments")
+        .select("*, projects(*)")
+        .eq("deployment_url", `https://${deploymentData.url}`)
+        .single();
+      deployment = byUrl;
+    }
+
     if (!deployment) {
+      console.warn(`⚠️ [WEBHOOK] No deployment found for vercel id: ${vercelId}`);
       return NextResponse.json({ error: "Deployment not found" }, { status: 404 });
     }
 
