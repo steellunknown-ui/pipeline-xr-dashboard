@@ -230,12 +230,11 @@ export async function triggerVercelDeploy(formData: {
       return { success: true, data: deployment };
     }
 
-    // ─── Trigger Vercel Deployment via Background Engine ────────────────
-    const projectSlug = project.name.toLowerCase().replace(/[^a-z0-9-]/g, "-").replace(/-+/g, "-").replace(/^-|-$/g, "");
-    
-    // Fire and forget - background engine handles the rest (Git Clone -> Inject ENVs -> Spawn Vercel Deploy -> Stream Logs)
-    const { DeploymentEngine } = await import('@/lib/deployment-engine');
-    DeploymentEngine.startDeployment(deployment.id, projectSlug).catch(console.error);
+    // ─── Trigger Real Vercel Deployment ────────────────────────────────
+    // Fire and forget — runDeploymentPipeline handles Vercel API call
+    // and saves vercel_deployment_id to DB so webhook can match it
+    const { runDeploymentPipeline } = await import('@/app/dashboard/actions/deployment-pipeline');
+    runDeploymentPipeline(deployment.id).catch(console.error);
 
     await createActivityLog({
       event: "deployment_created",
