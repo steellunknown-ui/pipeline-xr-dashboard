@@ -26,10 +26,10 @@ interface PatchPlan {
     file: string;
     reason: string;
     confidence: number;
-    linesToReplace: {
-        oldContent: string;
-        newContent: string;
-    }[];
+    oldCode: string;
+    newCode: string;
+    lineStart?: number;
+    lineEnd?: number;
 }
 
 export function AIFixAssistant({ deploymentId, projectId, onFixApplied, aiFixStatus }: AIFixAssistantProps) {
@@ -62,26 +62,30 @@ export function AIFixAssistant({ deploymentId, projectId, onFixApplied, aiFixSta
         setActionLog([]);
         setPlan(null);
 
+        let resolved = false;
         const eventSource = new EventSource(`/api/ai-fix?deploymentId=${deploymentId}`);
 
         eventSource.onmessage = (e) => {
             try {
                 const data = JSON.parse(e.data);
-                
+
                 if (data.type === "step") {
                     setActionLog(prev => [...prev, { step: data.step, text: data.text }]);
-                } 
+                }
                 else if (data.type === "FIX_READY") {
+                    resolved = true;
                     setPlan(data.fix);
                     setStep("review");
                     eventSource.close();
                 }
                 else if (data.type === "ENV_ERROR") {
+                    resolved = true;
                     setErrorMsg(data.message);
                     setStep("error");
                     eventSource.close();
                 }
                 else if (data.type === "error") {
+                    resolved = true;
                     setErrorMsg(data.message);
                     setStep("error");
                     eventSource.close();
@@ -91,11 +95,20 @@ export function AIFixAssistant({ deploymentId, projectId, onFixApplied, aiFixSta
             }
         };
 
-        eventSource.onerror = (e) => {
-            console.error("SSE Error", e);
-            setErrorMsg("Connection to AI Engine lost.");
-            setStep("error");
+        eventSource.onerror = () => {
             eventSource.close();
+            if (!resolved) {
+                // Fetch once to get the real HTTP error message (401, 500, etc.)
+                fetch(`/api/ai-fix?deploymentId=${deploymentId}`)
+                    .then(async (res) => {
+                        const text = await res.text().catch(() => `HTTP ${res.status}`);
+                        setErrorMsg(`AI engine error (${res.status}): ${text}`);
+                    })
+                    .catch(() => {
+                        setErrorMsg("AI engine unreachable. Check GITHUB_PAT and PIPELINE_XR_VERCEL_TOKEN are set, then retry.");
+                    })
+                    .finally(() => setStep("error"));
+            }
         };
     };
 
@@ -220,12 +233,12 @@ export function AIFixAssistant({ deploymentId, projectId, onFixApplied, aiFixSta
 
     if ((step === "review" || step === "applying") && plan) {
         // Map the new PatchPlan structure to DiffViewer's expected structure if needed
-        const changesForDiff = plan.linesToReplace.map(l => ({
+        const changesForDiff = [{
             filePath: plan.file,
             reason: plan.reason,
-            before: l.oldContent,
-            after: l.newContent
-        }));
+            before: plan.oldCode,
+            after: plan.newCode
+        }];
 
         return (
             <Card className="relative overflow-hidden border-blue-200/60 bg-gradient-to-br from-white to-blue-50/30 dark:from-zinc-950 dark:to-zinc-900 shadow-xl backdrop-blur-xl transition-all duration-500">
