@@ -49,8 +49,13 @@ export async function GET(req: Request) {
         if (!deployment) throw new Error("Deployment not found");
         
         const project = Array.isArray(deployment.projects) ? deployment.projects[0] : deployment.projects;
-        const owner = project.github_owner;
-        const repoName = project.github_repo_full_name?.split('/')[1] || project.name; // fallback
+        let owner = project.github_owner;
+        let repoName = project.github_repo_full_name?.split('/')[1] || project.name;
+        if (!owner && project.github_repo_url) {
+          const urlParts = new URL(project.github_repo_url).pathname.split('/').filter(Boolean);
+          owner = urlParts[0];
+          repoName = urlParts[1];
+        } // fallback
 
         // Fetch logs
         const { data: logs } = await supabase

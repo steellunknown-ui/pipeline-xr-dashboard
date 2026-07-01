@@ -56,8 +56,13 @@ async function runAutoRetry(deployment: any, logsData: any, attempt: number) {
     }
 
     // 2. Fetch repo tree & extract broken file
-    const owner = deployment.projects.github_owner;
-    const repoName = deployment.projects.github_repo_full_name?.split('/')[1] || deployment.projects.name;
+    let owner = deployment.projects.github_owner;
+    let repoName = deployment.projects.github_repo_full_name?.split('/')[1] || deployment.projects.name;
+    if (!owner && deployment.projects.github_repo_url) {
+      const urlParts = new URL(deployment.projects.github_repo_url).pathname.split('/').filter(Boolean);
+      owner = urlParts[0];
+      repoName = urlParts[1];
+    }
     const branch = deployment.branch || "main";
     
     const repoTree = await getRepoTree(githubToken, owner, repoName, branch);
