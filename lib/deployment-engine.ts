@@ -51,16 +51,16 @@ export class DeploymentEngine {
       
       const { data: project } = await supabase
         .from('projects')
-        .select('name, github_repo_id, github_repo_full_name, default_branch, auto_deploy_branch, vercel_project_id')
+        .select('name, github_repo_id, github_repo_full_name, github_owner, github_default_branch, auto_deploy_branch, vercel_project_id')
         .eq('id', projectId)
         .single();
         
       if (!project?.github_repo_id || !project?.github_repo_full_name) {
-         throw new Error("GitHub Repository ID or Full Name not found on project.");
+         throw new Error("GitHub Repository ID or Full Name not found on project. Please re-import the project from GitHub.");
       }
 
-      const branch = project.auto_deploy_branch || project.default_branch || 'main';
-      const [owner] = project.github_repo_full_name.split('/');
+      const branch = project.auto_deploy_branch || project.github_default_branch || 'main';
+      const owner = project.github_owner || project.github_repo_full_name.split('/')[0];
       
       const vercelToken = process.env.PIPELINE_VERCEL_TOKEN;
       if (!vercelToken) throw new Error("PIPELINE_VERCEL_TOKEN is not set.");
