@@ -1,4 +1,5 @@
 import { getSupabaseServer } from "@/lib/supabase-server";
+import { createClient } from "@supabase/supabase-js";
 import { getRepoTree, getFileContent } from "@/lib/github-api";
 import { analyzeErrorWithOpenRouter } from "@/lib/ai-fix-engine";
 
@@ -20,11 +21,22 @@ export async function GET(req: Request) {
     return new Response("Unauthorized", { status: 401 });
   }
 
-  let githubToken = process.env.GITHUB_PAT || session.provider_token;
+  let githubToken = session.provider_token;
   if (!githubToken) {
-    const githubIdentity = user.identities?.find((id: any) => id.provider === "github");
-    githubToken = githubIdentity?.identity_data?.access_token;
+    // Fetch from user_profiles where we store it on login
+    const adminClient = createClient(
+      process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      process.env.SUPABASE_SERVICE_ROLE_KEY!
+    );
+    const { data: profile } = await adminClient
+      .from('user_profiles')
+      .select('github_access_token')
+      .eq('id', user.id)
+      .single();
+    githubToken = profile?.github_access_token;
   }
+  // Last resort: platform PAT (only works for repos the PAT has access to)
+  if (!githubToken) githubToken = process.env.GITHUB_PAT;
 
   if (!githubToken) {
     return new Response("Missing GitHub token", { status: 403 });
