@@ -6,6 +6,8 @@ import { getRepoTree, getFileContent, getLatestCommitSha, createBlob, createTree
 import { analyzeErrorWithOpenRouter } from "@/lib/ai-fix-engine";
 import crypto from "crypto";
 
+export const dynamic = "force-dynamic";
+
 async function runAutoRetry(deployment: any, logsData: any, attempt: number) {
   try {
     const supabaseAdmin = createClient(
