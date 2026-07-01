@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase-server";
 import { type AuditLogEntry } from "@/lib/audit-log";
 
+export const dynamic = 'force-dynamic';
+
 /**
  * PRIORITY 12.1: Deployment Audit Log API
  *

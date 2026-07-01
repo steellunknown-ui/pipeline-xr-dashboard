@@ -47,6 +47,7 @@ export default function DeploymentLogsPage() {
   const [envValue, setEnvValue] = useState("");
   const [addingEnv, setAddingEnv] = useState(false);
   const [showExplanation, setShowExplanation] = useState(false);
+  const [showFailedPopup, setShowFailedPopup] = useState(false);
   
   const logsEndRef = useRef<HTMLDivElement>(null);
 
@@ -112,7 +113,7 @@ export default function DeploymentLogsPage() {
     return () => {
       eventSource.close();
     };
-  }, [deployment?.vercel_deployment_id, deploymentId]);
+  }, [deployment?.vercel_deployment_id, deploymentId, deployment?.status]);
 
   useEffect(() => {
     logsEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -136,6 +137,8 @@ export default function DeploymentLogsPage() {
         setTimeout(() => {
           router.push(`/dashboard/projects/${deployment.project_id}`);
         }, 1500);
+      } else if (previousStatus.current && previousStatus.current !== 'failed' && deployment.status === 'failed') {
+        setShowFailedPopup(true);
       }
       previousStatus.current = deployment.status;
     }
@@ -421,7 +424,7 @@ export default function DeploymentLogsPage() {
       )}
 
       {/* 2. DeploymentTimeline */}
-      <DeploymentTimeline deploymentId={deploymentId} />
+      <DeploymentTimeline deploymentId={deploymentId} status={deployment?.status} />
 
       {/* 2.3. Rollback Button (for failed deployments) */}
       {deployment && (
@@ -535,7 +538,33 @@ export default function DeploymentLogsPage() {
         onClose={() => setShowExplanation(false)}
       />
 
-
+      {/* Deployment Failed Popup */}
+      <AlertDialog open={showFailedPopup} onOpenChange={setShowFailedPopup}>
+        <AlertDialogContent className="bg-zinc-50 dark:bg-zinc-950 border dark:border-zinc-800">
+          <AlertDialogHeader>
+            <AlertDialogTitle className="flex items-center gap-2 text-red-600 dark:text-red-500">
+              <AlertCircle className="h-5 w-5" />
+              Deployment Failed
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              The deployment encountered an error during the build process.
+              {deployment?.error && (
+                <div className="mt-4 p-3 bg-red-500/10 border border-red-500/20 rounded-md text-red-600 dark:text-red-400 font-mono text-sm break-all">
+                  {deployment.error}
+                </div>
+              )}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogAction 
+              onClick={() => setShowFailedPopup(false)} 
+              className="bg-red-600 hover:bg-red-700 text-white"
+            >
+              OK
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
     </div>
   );

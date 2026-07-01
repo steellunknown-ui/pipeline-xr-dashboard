@@ -4,6 +4,8 @@ import { spawn } from "child_process";
 import * as path from "path";
 import { recordAuditEvent, AuditMessages } from "@/lib/audit-log";
 
+export const dynamic = 'force-dynamic';
+
 /**
  * PRIORITY 10.2: API to Trigger Build Runner
  *

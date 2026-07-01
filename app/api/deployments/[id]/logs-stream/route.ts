@@ -48,7 +48,16 @@ export async function GET(
       const decoder = new TextDecoder();
       let buffer = "";
 
+      let timeoutId: ReturnType<typeof setTimeout> | undefined;
+
       try {
+        // Fallback timeout: If no terminal state is received after 10 minutes,
+        // automatically mark as failed to prevent indefinite hanging.
+        timeoutId = setTimeout(() => {
+          controller.enqueue(`data: ${JSON.stringify({ type: "status", state: "ERROR", message: "Timeout waiting for deployment logs" })}\n\n`);
+          try { reader?.cancel(); } catch (e) {}
+        }, 10 * 60 * 1000);
+
         while (true) {
           const { done, value } = await reader.read();
           if (done) break;
@@ -71,7 +80,7 @@ export async function GET(
                 controller.enqueue(`data: ${JSON.stringify(sseData)}\n\n`);
               }
               
-              if (eventData.type === "state" && (eventData.payload.value === "READY" || eventData.payload.value === "ERROR")) {
+              if (eventData.type === "state" && (eventData.payload.value === "READY" || eventData.payload.value === "ERROR" || eventData.payload.value === "CANCELED")) {
                 const sseData = {
                   type: "status",
                   state: eventData.payload.value,
@@ -86,6 +95,7 @@ export async function GET(
       } catch (error) {
         console.error("Error reading log stream", error);
       } finally {
+        if (timeoutId) clearTimeout(timeoutId);
         controller.enqueue(`data: ${JSON.stringify({ type: "status", state: "ENDED" })}\n\n`);
         controller.close();
       }

@@ -24,15 +24,16 @@ interface TimelineData {
 
 interface DeploymentTimelineProps {
   deploymentId: string;
+  status?: string;
 }
 
-export function DeploymentTimeline({ deploymentId }: DeploymentTimelineProps) {
+export function DeploymentTimeline({ deploymentId, status }: DeploymentTimelineProps) {
   const [timeline, setTimeline] = useState<TimelineData | null>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     fetchTimeline();
-  }, [deploymentId]);
+  }, [deploymentId, status]);
 
   const fetchTimeline = async () => {
     try {
