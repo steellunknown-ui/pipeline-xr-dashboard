@@ -173,16 +173,45 @@ export async function POST(req: Request) {
       .from("deployments")
       .select("*, projects(*)")
       .eq("vercel_deployment_id", vercelId)
-      .single();
+      .maybeSingle();
 
-    // Fallback: match by URL if id not found
-    if (!deployment && deploymentData.url) {
-      const { data: byUrl } = await supabase
+    // Fallback: match by project + recent building status
+    // This handles the case where Vercel GitHub auto-deploy fires a DIFFERENT
+    // deployment ID than what our engine stored
+    if (!deployment) {
+      // Find the most recent 'building' deployment for this project via URL match
+      if (deploymentData.url) {
+        const { data: byUrl } = await supabase
+          .from("deployments")
+          .select("*, projects(*)")
+          .ilike("deployment_url", `%${deploymentData.url}%`)
+          .maybeSingle();
+        deployment = byUrl;
+      }
+    }
+
+    // Last fallback: find most recent building deployment and update its vercel_deployment_id
+    if (!deployment && deploymentData.meta?.githubRepoId) {
+      const { data: byProject } = await supabase
         .from("deployments")
         .select("*, projects(*)")
-        .eq("deployment_url", `https://${deploymentData.url}`)
-        .single();
-      deployment = byUrl;
+        .eq("status", "building")
+        .order("created_at", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+
+      if (byProject) {
+        // Update the vercel_deployment_id so future webhooks match correctly
+        await supabase
+          .from("deployments")
+          .update({ 
+            vercel_deployment_id: vercelId,
+            deployment_url: deploymentData.url ? `https://${deploymentData.url}` : null
+          })
+          .eq("id", byProject.id);
+        deployment = { ...byProject, vercel_deployment_id: vercelId };
+        console.log(`🔗 [WEBHOOK] Linked vercel id ${vercelId} to deployment ${byProject.id}`);
+      }
     }
 
     if (!deployment) {
