@@ -38,7 +38,10 @@ export async function getFileContent(token: string, owner: string, repo: string,
       Accept: "application/vnd.github.v3+json",
     },
   });
-  if (!res.ok) throw new Error("Failed to fetch file content");
+  if (!res.ok) {
+    const text = await res.text().catch(() => '');
+    throw new Error(`Failed to fetch file content: ${path} (Status ${res.status}) - ${text}`);
+  }
   return res.json();
 }
 

@@ -13,7 +13,7 @@ export async function POST(req: Request) {
       return NextResponse.json({ success: false, error: "Unauthorized" }, { status: 401 });
     }
 
-    let githubToken = session.provider_token;
+    let githubToken = process.env.GITHUB_PAT || session.provider_token;
     if (!githubToken) {
       const githubIdentity = user.identities?.find((id: any) => id.provider === "github");
       githubToken = githubIdentity?.identity_data?.access_token;

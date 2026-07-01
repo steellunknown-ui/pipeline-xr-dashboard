@@ -58,13 +58,32 @@ export async function GET(req: Request) {
         } // fallback
 
         // Fetch logs
-        const { data: logs } = await supabase
-          .from("deployment_logs")
-          .select("log_text")
-          .eq("deployment_id", deploymentId)
-          .order("created_at", { ascending: true });
-          
-        const fullLogs = logs?.map(l => l.log_text).join("\n") || "";
+        let fullLogs = "";
+        if (deployment.vercel_deployment_id) {
+          try {
+            const vercelToken = process.env.PIPELINE_XR_VERCEL_TOKEN || process.env.PIPELINE_VERCEL_TOKEN;
+            const teamIdStr = process.env.VERCEL_TEAM_ID ? `?teamId=${process.env.VERCEL_TEAM_ID}` : "";
+            const vRes = await fetch(`https://api.vercel.com/v2/deployments/${deployment.vercel_deployment_id}/events${teamIdStr}`, {
+              headers: { Authorization: `Bearer ${vercelToken}` }
+            });
+            if (vRes.ok) {
+              const events = await vRes.json();
+              fullLogs = events.map((e: any) => e.text || e.payload?.text || "").filter(Boolean).join("\n");
+            }
+          } catch (e) {
+            console.error("Failed to fetch Vercel logs", e);
+          }
+        }
+        
+        if (!fullLogs) {
+          const { data: logs } = await supabase
+            .from("deployment_logs")
+            .select("log_text")
+            .eq("deployment_id", deploymentId)
+            .order("created_at", { ascending: true });
+            
+          fullLogs = logs?.map(l => l.log_text).join("\n") || "";
+        }
         
         // SUB-STEP 1: ENV GUARDRAIL
         sendStep("env", "🛡️ Checking for ENV issues...");
