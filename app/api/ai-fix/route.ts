@@ -20,7 +20,7 @@ export async function GET(req: Request) {
     return new Response("Unauthorized", { status: 401 });
   }
 
-  let githubToken = session.provider_token;
+  let githubToken = process.env.GITHUB_PAT || session.provider_token;
   if (!githubToken) {
     const githubIdentity = user.identities?.find((id: any) => id.provider === "github");
     githubToken = githubIdentity?.identity_data?.access_token;
@@ -118,13 +118,32 @@ export async function GET(req: Request) {
         sendStep("file", "📂 Identifying broken file...");
         const { chatAI } = require("@/lib/ai-client");
         const extractPathRes = await chatAI([{
-          role: "user", 
-          content: `Extract the broken file path from these logs. Return ONLY the file path string, nothing else.\n\n${fullLogs.substring(fullLogs.length - 2000)}`
+          role: "user",
+          content: `You are a build log parser. Extract the single broken source file path from these build logs.
+Rules:
+- Return ONLY the relative file path (e.g. src/app/page.tsx)
+- No explanation, no markdown, no quotes
+- Must be a real file path with an extension
+- If multiple files, return the FIRST one that caused the error
+
+LOGS:
+${fullLogs.substring(fullLogs.length - 3000)}`
         }]);
-        
-        const filePath = extractPathRes.trim();
+
+        const rawPath = extractPathRes.trim().replace(/[`"']/g, '');
+        // Validate it looks like a file path (has an extension, no spaces)
+        const isValidPath = /^[^\s]+\.[a-zA-Z]{1,10}$/.test(rawPath);
+        if (!isValidPath) {
+          throw new Error(`AI could not identify a broken file path. Got: "${rawPath}". Check that the build logs contain a compiler error with a file path.`);
+        }
+
+        // Try to match against the actual repo tree to avoid 404s
+        const treeFiles: string[] = repoTree?.tree?.map((t: any) => t.path) || [];
+        const exactMatch = treeFiles.find(p => p === rawPath);
+        const fuzzyMatch = !exactMatch && treeFiles.find(p => p.endsWith(rawPath) || rawPath.endsWith(p.split('/').pop()!));
+        const filePath = exactMatch || fuzzyMatch || rawPath;
+
         sendStep("file", `📂 Opening ${filePath}...`);
-        
         const fileData = await getFileContent(githubToken, owner, repoName, filePath);
         const fileContent = Buffer.from(fileData.content, 'base64').toString('utf-8');
 
