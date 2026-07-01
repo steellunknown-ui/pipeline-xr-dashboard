@@ -190,8 +190,8 @@ export async function POST(req: Request) {
       }
     }
 
-    // Last fallback: find most recent building deployment and update its vercel_deployment_id
-    if (!deployment && deploymentData.meta?.githubRepoId) {
+    // Last fallback: find most recent building deployment and link it
+    if (!deployment) {
       const { data: byProject } = await supabase
         .from("deployments")
         .select("*, projects(*)")
@@ -201,10 +201,9 @@ export async function POST(req: Request) {
         .maybeSingle();
 
       if (byProject) {
-        // Update the vercel_deployment_id so future webhooks match correctly
         await supabase
           .from("deployments")
-          .update({ 
+          .update({
             vercel_deployment_id: vercelId,
             deployment_url: deploymentData.url ? `https://${deploymentData.url}` : null
           })
